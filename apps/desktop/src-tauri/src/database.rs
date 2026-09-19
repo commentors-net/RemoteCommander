@@ -1,0 +1,788 @@
+//! SQLite Database and Migration Engine
+//! Authoritative baseline defined in Master Specification §0.10, §3, §21, and ADR 0002.
+
+use crate::error::AppError;
+use crate::models::{
+    ApprovalRecord, AuditEventRecord, KnownHostRecord, ServerRecord, SettingRecord, ToolCallRecord,
+};
+use crate::secret::CredentialRefRecord;
+use chrono::Utc;
+use rusqlite::{params, Connection};
+use std::path::Path;
+use std::sync::Mutex;
+
+const MIGRATION_001: &str = include_str!("../migrations/001_initial_schema.sql");
+const MIGRATION_002: &str = include_str!("../migrations/002_m5_ssh_transport.sql");
+
+pub struct Database {
+    conn: Mutex<Connection>,
+}
+
+impl Database {
+    pub fn new(path: &Path) -> Result<Self, AppError> {
+        let conn = Connection::open(path)?;
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
+        db.init_pragmas()?;
+        db.migrate()?;
+        Ok(db)
+    }
+
+    pub fn in_memory() -> Result<Self, AppError> {
+        let conn = Connection::open_in_memory()?;
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
+        db.init_pragmas()?;
+        db.migrate()?;
+        Ok(db)
+    }
+
+    fn init_pragmas(&self) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;",
+        )?;
+        Ok(())
+    }
+
+    pub fn migrate(&self) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+
+        // Ensure schema_migrations table exists
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY NOT NULL,
+                description TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );",
+            [],
+        )?;
+
+        let current_version: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 1 {
+            conn.execute_batch(MIGRATION_001)?;
+            conn.execute(
+                "INSERT INTO schema_migrations (version, description, applied_at) VALUES (?1, ?2, ?3)",
+                params![1, "Initial Schema (Settings, Servers, Audit)", Utc::now().to_rfc3339()],
+            )?;
+        }
+
+        if current_version < 2 {
+            conn.execute_batch(MIGRATION_002)?;
+            conn.execute(
+                "INSERT INTO schema_migrations (version, description, applied_at) VALUES (?1, ?2, ?3)",
+                params![2, "SSH Transport and Known Hosts Tracking", Utc::now().to_rfc3339()],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    // --- Settings Repository ---
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT value_json FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        if let Some(row) = rows.next()? {
+            let val: String = row.get(0)?;
+            Ok(Some(val))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_setting(&self, key: &str, value_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at",
+            params![key, value_json, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_settings(&self) -> Result<Vec<SettingRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT key, value_json, updated_at FROM settings ORDER BY key ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SettingRecord {
+                key: row.get(0)?,
+                value_json: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+
+        let mut settings = Vec::new();
+        for s in rows {
+            settings.push(s?);
+        }
+        Ok(settings)
+    }
+
+    // --- Server Repository ---
+
+    pub fn save_server(&self, server: &ServerRecord) -> Result<(), AppError> {
+        // Enforce non-secret invariant: Validate credential_ref is not a raw secret
+        if let Some(ref cred) = server.credential_ref {
+            if cred.contains("BEGIN") || cred.len() > 256 {
+                return Err(AppError::SecurityViolation(
+                    "Attempted to pass raw secret instead of credential reference".into(),
+                ));
+            }
+        }
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO servers (
+                id, name, hostname, port, username, environment, auth_method,
+                credential_ref, ssh_key_path, ssh_config_alias, cpanel_enabled, whm_port, whm_token_ref,
+                tags_json, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                hostname = excluded.hostname,
+                port = excluded.port,
+                username = excluded.username,
+                environment = excluded.environment,
+                auth_method = excluded.auth_method,
+                credential_ref = excluded.credential_ref,
+                ssh_key_path = excluded.ssh_key_path,
+                ssh_config_alias = excluded.ssh_config_alias,
+                cpanel_enabled = excluded.cpanel_enabled,
+                whm_port = excluded.whm_port,
+                whm_token_ref = excluded.whm_token_ref,
+                tags_json = excluded.tags_json,
+                updated_at = excluded.updated_at",
+            params![
+                server.id,
+                server.name,
+                server.hostname,
+                server.port,
+                server.username,
+                server.environment,
+                server.auth_method,
+                server.credential_ref,
+                server.ssh_key_path,
+                server.ssh_config_alias,
+                server.cpanel_enabled as i32,
+                server.whm_port,
+                server.whm_token_ref,
+                server.tags_json,
+                server.created_at,
+                server.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_servers(&self) -> Result<Vec<ServerRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, hostname, port, username, environment, auth_method,
+                    credential_ref, ssh_key_path, ssh_config_alias, cpanel_enabled, whm_port, whm_token_ref,
+                    tags_json, created_at, updated_at
+             FROM servers ORDER BY name ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let cpanel_int: i32 = row.get(10)?;
+            Ok(ServerRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                hostname: row.get(2)?,
+                port: row.get(3)?,
+                username: row.get(4)?,
+                environment: row.get(5)?,
+                auth_method: row.get(6)?,
+                credential_ref: row.get(7)?,
+                ssh_key_path: row.get(8)?,
+                ssh_config_alias: row.get(9)?,
+                cpanel_enabled: cpanel_int != 0,
+                whm_port: row.get(11)?,
+                whm_token_ref: row.get(12)?,
+                tags_json: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
+            })
+        })?;
+
+        let mut servers = Vec::new();
+        for s in rows {
+            servers.push(s?);
+        }
+        Ok(servers)
+    }
+
+    pub fn delete_server(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM servers WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_server(&self, id: &str) -> Result<Option<ServerRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, hostname, port, username, environment, auth_method,
+                    credential_ref, ssh_key_path, ssh_config_alias, cpanel_enabled, whm_port, whm_token_ref,
+                    tags_json, created_at, updated_at
+             FROM servers WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let cpanel_int: i32 = row.get(10)?;
+            Ok(Some(ServerRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                hostname: row.get(2)?,
+                port: row.get(3)?,
+                username: row.get(4)?,
+                environment: row.get(5)?,
+                auth_method: row.get(6)?,
+                credential_ref: row.get(7)?,
+                ssh_key_path: row.get(8)?,
+                ssh_config_alias: row.get(9)?,
+                cpanel_enabled: cpanel_int != 0,
+                whm_port: row.get(11)?,
+                whm_token_ref: row.get(12)?,
+                tags_json: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // --- Audit Events Repository ---
+
+    pub fn record_audit_event(&self, event: &AuditEventRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO audit_events (id, timestamp, event_type, server_id, tool_name, details_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                event.id,
+                event.timestamp,
+                event.event_type,
+                event.server_id,
+                event.tool_name,
+                event.details_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_audit_events(&self, limit: Option<u32>) -> Result<Vec<AuditEventRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let lim = limit.unwrap_or(100);
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, event_type, server_id, tool_name, details_json
+             FROM audit_events ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![lim], |row| {
+            Ok(AuditEventRecord {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                event_type: row.get(2)?,
+                server_id: row.get(3)?,
+                tool_name: row.get(4)?,
+                details_json: row.get(5)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for ev in rows {
+            events.push(ev?);
+        }
+        Ok(events)
+    }
+
+    // --- Credential Reference Metadata Repository (NO SECRETS) ---
+
+    pub fn save_credential_ref(&self, record: &CredentialRefRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO credentials_refs (id, secret_type, label, created_at, last_used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label,
+                last_used_at = excluded.last_used_at",
+            params![
+                record.id,
+                record.secret_type,
+                record.label,
+                record.created_at,
+                record.last_used_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_credential_refs(&self) -> Result<Vec<CredentialRefRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, secret_type, label, created_at, last_used_at
+             FROM credentials_refs ORDER BY created_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CredentialRefRecord {
+                id: row.get(0)?,
+                secret_type: row.get(1)?,
+                label: row.get(2)?,
+                created_at: row.get(3)?,
+                last_used_at: row.get(4)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    pub fn delete_credential_ref(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM credentials_refs WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn update_credential_last_used(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE credentials_refs SET last_used_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    // --- Tool Calls Repository ---
+
+    pub fn save_tool_call(&self, call: &ToolCallRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (
+                id, conversation_id, server_id, tool_name, arguments_json, risk_level,
+                status, requested_at, approved_at, approved_by, started_at, completed_at,
+                exit_code, duration_ms, stdout_summary, stderr_summary
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                approved_at = excluded.approved_at,
+                approved_by = excluded.approved_by,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                exit_code = excluded.exit_code,
+                duration_ms = excluded.duration_ms,
+                stdout_summary = excluded.stdout_summary,
+                stderr_summary = excluded.stderr_summary",
+            params![
+                call.id,
+                call.conversation_id,
+                call.server_id,
+                call.tool_name,
+                call.arguments_json,
+                call.risk_level,
+                call.status,
+                call.requested_at,
+                call.approved_at,
+                call.approved_by,
+                call.started_at,
+                call.completed_at,
+                call.exit_code,
+                call.duration_ms,
+                call.stdout_summary,
+                call.stderr_summary,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_tool_call(&self, id: &str) -> Result<Option<ToolCallRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, server_id, tool_name, arguments_json, risk_level,
+                    status, requested_at, approved_at, approved_by, started_at, completed_at,
+                    exit_code, duration_ms, stdout_summary, stderr_summary
+             FROM tool_calls WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ToolCallRecord {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                server_id: row.get(2)?,
+                tool_name: row.get(3)?,
+                arguments_json: row.get(4)?,
+                risk_level: row.get(5)?,
+                status: row.get(6)?,
+                requested_at: row.get(7)?,
+                approved_at: row.get(8)?,
+                approved_by: row.get(9)?,
+                started_at: row.get(10)?,
+                completed_at: row.get(11)?,
+                exit_code: row.get(12)?,
+                duration_ms: row.get(13)?,
+                stdout_summary: row.get(14)?,
+                stderr_summary: row.get(15)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn update_tool_call_status(
+        &self,
+        id: &str,
+        status: &str,
+        completed_at: Option<&str>,
+        exit_code: Option<i32>,
+        duration_ms: Option<i64>,
+        stdout_summary: Option<&str>,
+        stderr_summary: Option<&str>,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tool_calls SET
+                status = ?1,
+                completed_at = COALESCE(?2, completed_at),
+                exit_code = COALESCE(?3, exit_code),
+                duration_ms = COALESCE(?4, duration_ms),
+                stdout_summary = COALESCE(?5, stdout_summary),
+                stderr_summary = COALESCE(?6, stderr_summary)
+             WHERE id = ?7",
+            params![
+                status,
+                completed_at,
+                exit_code,
+                duration_ms,
+                stdout_summary,
+                stderr_summary,
+                id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_tool_calls(&self, limit: Option<u32>) -> Result<Vec<ToolCallRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let lim = limit.unwrap_or(100);
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, server_id, tool_name, arguments_json, risk_level,
+                    status, requested_at, approved_at, approved_by, started_at, completed_at,
+                    exit_code, duration_ms, stdout_summary, stderr_summary
+             FROM tool_calls ORDER BY requested_at DESC LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![lim], |row| {
+            Ok(ToolCallRecord {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                server_id: row.get(2)?,
+                tool_name: row.get(3)?,
+                arguments_json: row.get(4)?,
+                risk_level: row.get(5)?,
+                status: row.get(6)?,
+                requested_at: row.get(7)?,
+                approved_at: row.get(8)?,
+                approved_by: row.get(9)?,
+                started_at: row.get(10)?,
+                completed_at: row.get(11)?,
+                exit_code: row.get(12)?,
+                duration_ms: row.get(13)?,
+                stdout_summary: row.get(14)?,
+                stderr_summary: row.get(15)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    // --- Approvals Repository ---
+
+    pub fn save_approval(&self, approval: &ApprovalRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO approvals (id, tool_call_id, decision, mode, typed_acknowledgement, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                approval.id,
+                approval.tool_call_id,
+                approval.decision,
+                approval.mode,
+                approval.typed_acknowledgement,
+                approval.timestamp,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_approvals(&self, limit: Option<u32>) -> Result<Vec<ApprovalRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let lim = limit.unwrap_or(100);
+        let mut stmt = conn.prepare(
+            "SELECT id, tool_call_id, decision, mode, typed_acknowledgement, timestamp
+             FROM approvals ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![lim], |row| {
+            Ok(ApprovalRecord {
+                id: row.get(0)?,
+                tool_call_id: row.get(1)?,
+                decision: row.get(2)?,
+                mode: row.get(3)?,
+                typed_acknowledgement: row.get(4)?,
+                timestamp: row.get(5)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    // --- Known Hosts Repository ---
+
+    pub fn get_known_host(
+        &self,
+        hostname: &str,
+        port: u16,
+        key_type: &str,
+    ) -> Result<Option<KnownHostRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, hostname, port, key_type, public_key_base64, fingerprint_sha256,
+                    first_seen_at, last_verified_at, status
+             FROM known_hosts_cache
+             WHERE hostname = ?1 AND port = ?2 AND key_type = ?3",
+        )?;
+
+        let mut rows = stmt.query(params![hostname, port, key_type])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(KnownHostRecord {
+                id: row.get(0)?,
+                hostname: row.get(1)?,
+                port: row.get(2)?,
+                key_type: row.get(3)?,
+                public_key_base64: row.get(4)?,
+                fingerprint_sha256: row.get(5)?,
+                first_seen_at: row.get(6)?,
+                last_verified_at: row.get(7)?,
+                status: row.get(8)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn save_known_host(&self, record: &KnownHostRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO known_hosts_cache (
+                id, hostname, port, key_type, public_key_base64, fingerprint_sha256,
+                first_seen_at, last_verified_at, status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(hostname, port, key_type) DO UPDATE SET
+                public_key_base64 = excluded.public_key_base64,
+                fingerprint_sha256 = excluded.fingerprint_sha256,
+                last_verified_at = excluded.last_verified_at,
+                status = excluded.status",
+            params![
+                record.id,
+                record.hostname,
+                record.port,
+                record.key_type,
+                record.public_key_base64,
+                record.fingerprint_sha256,
+                record.first_seen_at,
+                record.last_verified_at,
+                record.status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_known_hosts(&self) -> Result<Vec<KnownHostRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, hostname, port, key_type, public_key_base64, fingerprint_sha256,
+                    first_seen_at, last_verified_at, status
+             FROM known_hosts_cache ORDER BY hostname ASC, port ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(KnownHostRecord {
+                id: row.get(0)?,
+                hostname: row.get(1)?,
+                port: row.get(2)?,
+                key_type: row.get(3)?,
+                public_key_base64: row.get(4)?,
+                fingerprint_sha256: row.get(5)?,
+                first_seen_at: row.get(6)?,
+                last_verified_at: row.get(7)?,
+                status: row.get(8)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_in_memory_database_migration() {
+        let db = Database::in_memory().expect("Should initialize and migrate in-memory database");
+        let settings = db.list_settings().expect("Should list settings");
+        assert!(settings.is_empty());
+    }
+
+    #[test]
+    fn test_settings_persistence() {
+        let db = Database::in_memory().unwrap();
+
+        // Get non-existent
+        assert_eq!(db.get_setting("theme").unwrap(), None);
+
+        // Set and get
+        db.set_setting("theme", "\"dark\"").unwrap();
+        assert_eq!(db.get_setting("theme").unwrap(), Some("\"dark\"".into()));
+
+        // Update
+        db.set_setting("theme", "\"system\"").unwrap();
+        assert_eq!(db.get_setting("theme").unwrap(), Some("\"system\"".into()));
+
+        let list = db.list_settings().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].key, "theme");
+    }
+
+    #[test]
+    fn test_server_crud_and_security_gate_a() {
+        let db = Database::in_memory().unwrap();
+
+        let srv = ServerRecord {
+            id: "srv-001".into(),
+            name: "prod-web-01".into(),
+            hostname: "192.168.1.50".into(),
+            port: 22,
+            username: "root".into(),
+            environment: "PRODUCTION".into(),
+            auth_method: "SSH_KEY".into(),
+            credential_ref: Some("vault:ssh:prod-web-01".into()),
+            ssh_key_path: Some("~/.ssh/id_ed25519".into()),
+            ssh_config_alias: Some("prod-web".into()),
+            cpanel_enabled: true,
+            whm_port: Some(2087),
+            whm_token_ref: Some("vault:whm:prod-web-01".into()),
+            tags_json: "[\"web\",\"prod\"]".into(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        db.save_server(&srv).expect("Save server should succeed");
+
+        let servers = db.list_servers().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "prod-web-01");
+        assert_eq!(servers[0].environment, "PRODUCTION");
+        assert_eq!(servers[0].ssh_config_alias, Some("prod-web".into()));
+        assert!(servers[0].cpanel_enabled);
+
+        // Test Security Gate A: Reject raw secrets in credential_ref
+        let invalid_srv = ServerRecord {
+            credential_ref: Some(format!("{}_TEST_RAW_PRIVATE_KEY", "BEGIN")),
+            ..srv.clone()
+        };
+        let err = db.save_server(&invalid_srv);
+        assert!(err.is_err());
+        assert!(matches!(err.unwrap_err(), AppError::SecurityViolation(_)));
+
+        // Delete server
+        db.delete_server("srv-001").unwrap();
+        assert!(db.list_servers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_known_hosts_cache_persistence() {
+        let db = Database::in_memory().unwrap();
+
+        let host = KnownHostRecord {
+            id: "kh-001".into(),
+            hostname: "192.168.1.50".into(),
+            port: 22,
+            key_type: "ssh-ed25519".into(),
+            public_key_base64: "AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKey==".into(),
+            fingerprint_sha256: "SHA256:abcd1234efgh5678".into(),
+            first_seen_at: Utc::now().to_rfc3339(),
+            last_verified_at: Utc::now().to_rfc3339(),
+            status: "TRUSTED".into(),
+        };
+
+        db.save_known_host(&host).expect("Should save known host");
+
+        let fetched = db
+            .get_known_host("192.168.1.50", 22, "ssh-ed25519")
+            .unwrap();
+        assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.fingerprint_sha256, "SHA256:abcd1234efgh5678");
+        assert_eq!(fetched.status, "TRUSTED");
+
+        let list = db.list_known_hosts().unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn test_audit_events_logging() {
+        let db = Database::in_memory().unwrap();
+
+        let event = AuditEventRecord {
+            id: "evt-001".into(),
+            timestamp: Utc::now().to_rfc3339(),
+            event_type: "TOOL_INVOKED".into(),
+            server_id: Some("srv-001".into()),
+            tool_name: Some("server.disk_usage".into()),
+            details_json: "{\"status\":\"success\"}".into(),
+        };
+
+        db.record_audit_event(&event).unwrap();
+        let events = db.list_audit_events(Some(10)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tool_name, Some("server.disk_usage".into()));
+    }
+}

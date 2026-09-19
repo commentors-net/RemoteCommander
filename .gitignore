@@ -1,0 +1,90 @@
+# RemoteCommander Gitignore
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Rust / Cargo
+target/
+**/*.rs.bk
+Cargo.lock.bk
+
+# Tauri / Frontend Build outputs
+dist/
+dist-ssr/
+build/
+*.local
+
+# Environment variables & secrets (CRITICAL: Security Gate A)
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.kdbx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.ppk
+
+# Local SQLite databases (Non-production test/scratch data)
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing coverage & caches
+coverage/
+.nyc_output/
+.vitest/
+.eslintcache/
+.eslintcache
+*.tsbuildinfo
+
+# Vite & build caches
+.vite/
+.turbo/
+.npm/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.swp
+*~
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Local Agent & Scratch directories
+scratch/
+.claude/
+.gemini/
+
+# SSH temporary/known hosts
+known_hosts
+known_hosts.old
+
+# User reference directory
+/not-important/

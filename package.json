@@ -1,0 +1,34 @@
+{
+  "name": "remote-commander-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure Desktop AI Operations Assistant",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "test": "npm run --workspaces --if-present test",
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "lint": "eslint . && npm run prettier:check",
+    "lint:fix": "eslint . --fix && npm run prettier:fix",
+    "prettier:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "prettier:fix": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "security:scan": "node scripts/scan-secrets.mjs",
+    "security:audit": "npm audit --audit-level=high",
+    "rust:test": "cargo test --workspace",
+    "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:fmt": "cargo fmt --all -- --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  }
+}

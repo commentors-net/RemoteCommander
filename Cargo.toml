@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80.0"
+authors = ["RemoteCommander Team"]
+license = "MIT"
+repository = "https://github.com/puru/RemoteCommander"
+

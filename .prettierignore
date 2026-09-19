@@ -1,0 +1,14 @@
+node_modules
+target
+dist
+dist-ssr
+build
+coverage
+*.sqlite*
+*.db*
+*.lock
+package-lock.json
+/not-important
+**/gen/**
+MASTER_SPEC*
+*.local

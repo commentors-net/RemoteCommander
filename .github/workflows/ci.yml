@@ -1,0 +1,55 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Lint, Test & Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run Secret Scanning Gate
+        run: npm run security:scan
+
+      - name: Run Security Checks
+        run: node scripts/security-check.mjs
+
+      - name: Check Code Formatting
+        run: |
+          npm run prettier:check
+          cargo fmt --all -- --check
+
+      - name: Run Linters
+        run: |
+          npm run lint
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Run TypeScript Unit Tests
+        run: npm test
+
+      - name: Run Rust Tests
+        run: cargo test --workspace
