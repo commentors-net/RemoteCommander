@@ -15,13 +15,14 @@ export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<ViewMode>('Chat');
   const [appInfo, setAppInfo] = useState<AppInfo>({
     name: 'RemoteCommander',
-    version: '0.1.0',
+    version: '1.0.0',
     default_ssh_port: 22,
     default_whm_port: 2087,
   });
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [activeServerId, setActiveServerId] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('SAFE_AUTOMATION');
+  const [splitView, setSplitView] = useState<boolean>(false);
 
   useEffect(() => {
     async function init() {
@@ -86,20 +87,48 @@ export const App: React.FC = () => {
           onChangeMode={handleUpdateMode}
         />
 
-        <main className="content-pane">
-          {activeView === 'Chat' && <ChatView activeServer={activeServer} />}
-          {activeView === 'Servers' && (
-            <ServersView
-              servers={servers}
-              onAddServer={handleAddServer}
-              onDeleteServer={handleDeleteServer}
-            />
-          )}
-          {activeView === 'Terminal' && <TerminalView activeServer={activeServer} />}
-          {activeView === 'Files' && <FilesView activeServer={activeServer} />}
-          {activeView === 'Activity' && <ActivityView />}
-          {activeView === 'Settings' && (
-            <SettingsView currentMode={permissionMode} onUpdateMode={handleUpdateMode} />
+        <main
+          className="content-pane"
+          style={
+            splitView ? { display: 'flex', gap: '16px', height: 'calc(100vh - 80px)' } : undefined
+          }
+        >
+          {splitView ? (
+            <>
+              <div style={{ flex: 1, minWidth: 0, height: '100%' }}>
+                <ChatView activeServer={activeServer} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0, height: '100%' }}>
+                <TerminalView
+                  activeServer={activeServer}
+                  splitMode={true}
+                  onToggleSplit={() => setSplitView(false)}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              {activeView === 'Chat' && <ChatView activeServer={activeServer} />}
+              {activeView === 'Servers' && (
+                <ServersView
+                  servers={servers}
+                  onAddServer={handleAddServer}
+                  onDeleteServer={handleDeleteServer}
+                />
+              )}
+              {activeView === 'Terminal' && (
+                <TerminalView
+                  activeServer={activeServer}
+                  splitMode={false}
+                  onToggleSplit={() => setSplitView(true)}
+                />
+              )}
+              {activeView === 'Files' && <FilesView activeServer={activeServer} />}
+              {activeView === 'Activity' && <ActivityView />}
+              {activeView === 'Settings' && (
+                <SettingsView currentMode={permissionMode} onUpdateMode={handleUpdateMode} />
+              )}
+            </>
           )}
         </main>
       </div>

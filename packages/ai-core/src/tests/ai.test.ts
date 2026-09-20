@@ -153,4 +153,97 @@ describe('ToolLoopOrchestrator (M4 AI Loop Vertical Slice)', () => {
     expect(approvalCallbackInvoked).toBe(true);
     expect(result.requiresApproval).toBeDefined();
   });
+
+  it('orchestrates seamless provider fallback when primary provider encounters an error (M17)', async () => {
+    const { MockAIProvider, ToolLoopOrchestrator, AIProviderError } = await import('../index.js');
+    type P = import('../provider.js').AIProvider;
+
+    // Failing primary provider that throws rate limit 429
+    const failingPrimary: P = {
+      providerId: 'failing-primary-openai',
+      listModels: async () => [],
+      supportsTools: () => true,
+      normalizeToolCall: (raw: unknown) =>
+        raw as { id: string; toolName: string; argumentsJson: string },
+      streamChat: async function* () {
+        yield* [];
+        throw new AIProviderError({
+          code: 'RATE_LIMITED',
+          message: 'Rate limit 429 exceeded on primary endpoint',
+          provider: 'failing-primary-openai',
+          status: 429,
+        });
+      },
+    };
+
+    const healthyFallback = new MockAIProvider();
+    const fallbackEvents: unknown[] = [];
+    const stepsRecorded: string[] = [];
+
+    const orchestrator = new ToolLoopOrchestrator(failingPrimary, [], {}, [healthyFallback]);
+
+    const result = await orchestrator.run(
+      [{ role: 'user', content: 'Get system information' }],
+      'mock-gpt-4o',
+      async () => ({
+        success: true,
+        output: JSON.stringify({ os: 'linux', family: 'debian' }),
+      }),
+      {
+        onStep: (s) => stepsRecorded.push(s.type),
+        onFallbackTriggered: (ev) => fallbackEvents.push(ev),
+      },
+    );
+
+    expect(fallbackEvents.length).toBe(1);
+    const firstEv = fallbackEvents[0] as {
+      fromProvider: string;
+      toProvider: string;
+      reason: string;
+    };
+    expect(firstEv.fromProvider).toBe('failing-primary-openai');
+    expect(firstEv.toProvider).toBe('mock');
+    expect(firstEv.reason).toContain('Rate limit 429');
+    expect(stepsRecorded).toContain('PROVIDER_FALLBACK');
+    expect(result.activeProviderId).toBe('mock');
+    expect(result.finalText.length).toBeGreaterThan(0);
+  });
+
+  it('throws descriptive error when all providers in fallback chain fail (M17)', async () => {
+    const { ToolLoopOrchestrator } = await import('../index.js');
+    type P = import('../provider.js').AIProvider;
+
+    const failingPrimary: P = {
+      providerId: 'primary-err',
+      listModels: async () => [],
+      supportsTools: () => true,
+      normalizeToolCall: (raw: unknown) =>
+        raw as { id: string; toolName: string; argumentsJson: string },
+      streamChat: async function* () {
+        yield* [];
+        throw new Error('Primary connection refused');
+      },
+    };
+
+    const failingFallback: P = {
+      providerId: 'fallback-err',
+      listModels: async () => [],
+      supportsTools: () => true,
+      normalizeToolCall: (raw: unknown) =>
+        raw as { id: string; toolName: string; argumentsJson: string },
+      streamChat: async function* () {
+        yield* [];
+        throw new Error('Secondary quota exceeded');
+      },
+    };
+
+    const orchestrator = new ToolLoopOrchestrator(failingPrimary, [], {}, [failingFallback]);
+
+    await expect(
+      orchestrator.run([{ role: 'user', content: 'Hello' }], 'test-model', async () => ({
+        success: true,
+        output: '',
+      })),
+    ).rejects.toThrow(/AI provider 'fallback-err' failed and no fallback providers remain/);
+  });
 });

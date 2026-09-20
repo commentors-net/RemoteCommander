@@ -1,4 +1,4 @@
-export const DESKTOP_VERSION = '0.1.0';
+export const DESKTOP_VERSION = '1.0.0';
 export const SUPPORTED_VIEWS = [
   'Chat',
   'Servers',

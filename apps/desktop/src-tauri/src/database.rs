@@ -8,8 +8,29 @@ use crate::models::{
 use crate::secret::CredentialRefRecord;
 use chrono::Utc;
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DatabaseIntegrityResult {
+    pub ok: bool,
+    pub integrity_check: String,
+    pub foreign_key_check: Vec<String>,
+    pub schema_version: i64,
+    pub total_servers: i64,
+    pub total_audit_events: i64,
+    pub total_tool_calls: i64,
+    pub total_known_hosts: i64,
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DatabaseVacuumResult {
+    pub success: bool,
+    pub message: String,
+    pub vacuumed_at: String,
+}
 
 const MIGRATION_001: &str = include_str!("../migrations/001_initial_schema.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_m5_ssh_transport.sql");
@@ -314,6 +335,90 @@ impl Database {
             events.push(ev?);
         }
         Ok(events)
+    }
+
+    pub fn prune_audit_events(&self, retention_days: u32) -> Result<usize, AppError> {
+        if retention_days == 0 {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+        let deleted = conn.execute(
+            "DELETE FROM audit_events WHERE timestamp < ?1",
+            params![cutoff_str],
+        )?;
+        Ok(deleted)
+    }
+
+    pub fn export_audit_events(
+        &self,
+        format: &str,
+        server_id: Option<&str>,
+        event_type: Option<&str>,
+    ) -> Result<String, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut query =
+            "SELECT id, timestamp, event_type, server_id, tool_name, details_json FROM audit_events WHERE 1=1"
+                .to_string();
+        let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
+
+        if let Some(sid) = server_id {
+            if !sid.is_empty() {
+                query.push_str(" AND server_id = ?");
+                params_vec.push(rusqlite::types::Value::Text(sid.to_string()));
+            }
+        }
+
+        if let Some(etype) = event_type {
+            if !etype.is_empty() {
+                query.push_str(" AND event_type = ?");
+                params_vec.push(rusqlite::types::Value::Text(etype.to_string()));
+            }
+        }
+
+        query.push_str(" ORDER BY timestamp DESC");
+
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+            Ok(AuditEventRecord {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                event_type: row.get(2)?,
+                server_id: row.get(3)?,
+                tool_name: row.get(4)?,
+                details_json: row.get(5)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for ev in rows {
+            events.push(ev?);
+        }
+
+        if format.eq_ignore_ascii_case("csv") {
+            let mut csv =
+                String::from("id,timestamp,event_type,server_id,tool_name,details_json\n");
+            for ev in events {
+                let sid = ev.server_id.as_deref().unwrap_or("");
+                let tname = ev.tool_name.as_deref().unwrap_or("");
+                let escaped_details = ev.details_json.replace('"', "\"\"");
+                csv.push_str(&format!(
+                    "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                    ev.id.replace('"', "\"\""),
+                    ev.timestamp.replace('"', "\"\""),
+                    ev.event_type.replace('"', "\"\""),
+                    sid.replace('"', "\"\""),
+                    tname.replace('"', "\"\""),
+                    escaped_details,
+                ));
+            }
+            Ok(csv)
+        } else {
+            serde_json::to_string_pretty(&events).map_err(|e| {
+                AppError::Database(format!("Failed to serialize audit export JSON: {}", e))
+            })
+        }
     }
 
     // --- Credential Reference Metadata Repository (NO SECRETS) ---
@@ -658,6 +763,85 @@ impl Database {
         }
         Ok(list)
     }
+
+    // --- Database Maintenance & Integrity (Milestone M17) ---
+
+    pub fn check_integrity(&self) -> Result<DatabaseIntegrityResult, AppError> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. PRAGMA integrity_check
+        let mut stmt = conn.prepare("PRAGMA integrity_check;")?;
+        let mut rows = stmt.query([])?;
+        let mut integrity_messages = Vec::new();
+        while let Some(row) = rows.next()? {
+            let msg: String = row.get(0)?;
+            integrity_messages.push(msg);
+        }
+        let integrity_check = integrity_messages.join("; ");
+        let is_ok = integrity_check.eq_ignore_ascii_case("ok");
+
+        // 2. PRAGMA foreign_key_check
+        let mut fk_stmt = conn.prepare("PRAGMA foreign_key_check;")?;
+        let mut fk_rows = fk_stmt.query([])?;
+        let mut fk_violations = Vec::new();
+        while let Some(row) = fk_rows.next()? {
+            let table: String = row.get(0)?;
+            let rowid: i64 = row.get(1)?;
+            let target_table: String = row.get(2)?;
+            let fkid: i64 = row.get(3)?;
+            fk_violations.push(format!(
+                "FK violation in {table} (row {rowid}) -> {target_table} (fkid {fkid})"
+            ));
+        }
+
+        // 3. Schema version
+        let schema_version: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // 4. Record counts
+        let total_servers: i64 = conn
+            .query_row("SELECT COUNT(*) FROM servers", [], |row| row.get(0))
+            .unwrap_or(0);
+        let total_audit_events: i64 = conn
+            .query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))
+            .unwrap_or(0);
+        let total_tool_calls: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tool_calls", [], |row| row.get(0))
+            .unwrap_or(0);
+        let total_known_hosts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM known_hosts_cache", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+
+        Ok(DatabaseIntegrityResult {
+            ok: is_ok && fk_violations.is_empty(),
+            integrity_check,
+            foreign_key_check: fk_violations,
+            schema_version,
+            total_servers,
+            total_audit_events,
+            total_tool_calls,
+            total_known_hosts,
+            checked_at: Utc::now().to_rfc3339(),
+        })
+    }
+
+    pub fn vacuum_database(&self) -> Result<DatabaseVacuumResult, AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("VACUUM; PRAGMA optimize;")?;
+        Ok(DatabaseVacuumResult {
+            success: true,
+            message: "Database successfully vacuumed and query planner statistics optimized"
+                .to_string(),
+            vacuumed_at: Utc::now().to_rfc3339(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -784,5 +968,112 @@ mod tests {
         let events = db.list_audit_events(Some(10)).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].tool_name, Some("server.disk_usage".into()));
+    }
+
+    #[test]
+    fn test_audit_events_pruning() {
+        let db = Database::in_memory().unwrap();
+
+        // Old event from 60 days ago
+        let old_time = (Utc::now() - chrono::Duration::days(60)).to_rfc3339();
+        let old_event = AuditEventRecord {
+            id: "evt-old".into(),
+            timestamp: old_time,
+            event_type: "TOOL_INVOKED".into(),
+            server_id: Some("srv-001".into()),
+            tool_name: Some("server.system_info".into()),
+            details_json: "{}".into(),
+        };
+
+        // Recent event from today
+        let recent_time = Utc::now().to_rfc3339();
+        let recent_event = AuditEventRecord {
+            id: "evt-recent".into(),
+            timestamp: recent_time,
+            event_type: "TOOL_INVOKED".into(),
+            server_id: Some("srv-001".into()),
+            tool_name: Some("server.disk_usage".into()),
+            details_json: "{}".into(),
+        };
+
+        db.record_audit_event(&old_event).unwrap();
+        db.record_audit_event(&recent_event).unwrap();
+        assert_eq!(db.list_audit_events(None).unwrap().len(), 2);
+
+        // Pruning with 30 days retention should remove the 60-day-old event
+        let pruned = db.prune_audit_events(30).unwrap();
+        assert_eq!(pruned, 1);
+
+        let remaining = db.list_audit_events(None).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "evt-recent");
+
+        // Retention 0 means indefinite (no deletion)
+        let pruned_zero = db.prune_audit_events(0).unwrap();
+        assert_eq!(pruned_zero, 0);
+    }
+
+    #[test]
+    fn test_export_audit_events() {
+        let db = Database::in_memory().unwrap();
+
+        let ev1 = AuditEventRecord {
+            id: "evt-001".into(),
+            timestamp: "2026-09-20T10:00:00Z".into(),
+            event_type: "TOOL_INVOKED".into(),
+            server_id: Some("srv-prod".into()),
+            tool_name: Some("server.system_info".into()),
+            details_json: r#"{"status":"ok"}"#.into(),
+        };
+        let ev2 = AuditEventRecord {
+            id: "evt-002".into(),
+            timestamp: "2026-09-20T10:05:00Z".into(),
+            event_type: "SECURITY_VIOLATION".into(),
+            server_id: Some("srv-stage".into()),
+            tool_name: Some("ssh.execute".into()),
+            details_json: r#"{"blocked":true}"#.into(),
+        };
+
+        db.record_audit_event(&ev1).unwrap();
+        db.record_audit_event(&ev2).unwrap();
+
+        // JSON export
+        let json_out = db.export_audit_events("json", None, None).unwrap();
+        assert!(json_out.contains("evt-001"));
+        assert!(json_out.contains("evt-002"));
+
+        // CSV export
+        let csv_out = db.export_audit_events("csv", None, None).unwrap();
+        assert!(csv_out.starts_with("id,timestamp,event_type,server_id,tool_name,details_json"));
+        assert!(csv_out.contains("\"evt-001\""));
+        assert!(csv_out.contains("\"TOOL_INVOKED\""));
+        assert!(csv_out.contains("\"SECURITY_VIOLATION\""));
+
+        // Filtering by server_id
+        let filtered_json = db
+            .export_audit_events("json", Some("srv-prod"), None)
+            .unwrap();
+        assert!(filtered_json.contains("evt-001"));
+        assert!(!filtered_json.contains("evt-002"));
+    }
+
+    #[test]
+    fn test_database_integrity_check_and_vacuum() {
+        let db = Database::in_memory().unwrap();
+
+        // Check initial integrity
+        let integrity = db
+            .check_integrity()
+            .expect("Integrity check should succeed");
+        assert!(integrity.ok);
+        assert_eq!(integrity.integrity_check, "ok");
+        assert!(integrity.foreign_key_check.is_empty());
+        assert_eq!(integrity.schema_version, 2);
+        assert_eq!(integrity.total_servers, 0);
+
+        // Perform vacuum and query planner optimization
+        let vacuum = db.vacuum_database().expect("Vacuum should succeed");
+        assert!(vacuum.success);
+        assert!(vacuum.message.contains("successfully vacuumed"));
     }
 }

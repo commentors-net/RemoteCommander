@@ -1,6 +1,6 @@
 {
   "name": "remote-commander-monorepo",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Secure Desktop AI Operations Assistant",
   "license": "MIT",
@@ -18,6 +18,8 @@
     "prettier:fix": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "security:scan": "node scripts/scan-secrets.mjs",
     "security:audit": "npm audit --audit-level=high",
+    "sbom:generate": "node scripts/generate-sbom.mjs",
+    "supply-chain:verify": "node scripts/verify-supply-chain.mjs",
     "rust:test": "cargo test --workspace",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
     "rust:fmt": "cargo fmt --all -- --check"

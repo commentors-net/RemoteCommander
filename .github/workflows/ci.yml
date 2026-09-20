@@ -35,6 +35,9 @@ jobs:
       - name: Run Security Checks
         run: node scripts/security-check.mjs
 
+      - name: Verify Supply Chain & SBOM
+        run: npm run supply-chain:verify
+
       - name: Check Code Formatting
         run: |
           npm run prettier:check

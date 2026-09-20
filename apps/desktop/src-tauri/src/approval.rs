@@ -29,6 +29,14 @@ pub struct ApprovalRequest {
     pub typed_confirmation_expected: Option<String>,
     pub created_at: String,
     pub expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authenticated_user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_resource: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub likely_impact: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_state: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,7 +53,7 @@ pub enum ToolExecutionOutcome {
     #[serde(rename = "executed")]
     Executed(ToolResult),
     #[serde(rename = "approval_required")]
-    ApprovalRequired(ApprovalRequest),
+    ApprovalRequired(Box<ApprovalRequest>),
     #[serde(rename = "denied")]
     Denied { reason: String },
 }
@@ -105,10 +113,12 @@ impl ApprovalManager {
         let tool_def = registry.validate_invocation(&request)?;
 
         // 2. Resolve target server if specified
-        let target_server_id = request
-            .target_server_id
-            .clone()
-            .or_else(|| request.arguments.get("server_id").and_then(|v| v.as_str().map(|s| s.to_string())));
+        let target_server_id = request.target_server_id.clone().or_else(|| {
+            request
+                .arguments
+                .get("server_id")
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+        });
         let target_server = if let Some(ref srv_id) = target_server_id {
             db.get_server(srv_id)?
         } else {
@@ -238,6 +248,21 @@ impl ApprovalManager {
                     None
                 };
 
+                let auth_user = target_server
+                    .as_ref()
+                    .map(|s| s.username.clone())
+                    .or_else(|| authenticated_user.clone());
+
+                let target_res = policy_decision.target_resource.or_else(|| {
+                    request
+                        .arguments
+                        .get("path")
+                        .or_else(|| request.arguments.get("file_path"))
+                        .or_else(|| request.arguments.get("command"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                });
+
                 let approval_req = ApprovalRequest {
                     id: approval_id.clone(),
                     tool_call_id: tool_call_id.clone(),
@@ -253,6 +278,10 @@ impl ApprovalManager {
                     typed_confirmation_expected: expected_confirmation,
                     created_at: created_dt.to_rfc3339(),
                     expires_at: expires_dt.to_rfc3339(),
+                    authenticated_user: auth_user,
+                    target_resource: target_res,
+                    likely_impact: policy_decision.likely_impact,
+                    rollback_state: policy_decision.rollback_state,
                 };
 
                 // Save pending tool call record in SQLite
@@ -303,7 +332,9 @@ impl ApprovalManager {
                     },
                 );
 
-                Ok(ToolExecutionOutcome::ApprovalRequired(approval_req))
+                Ok(ToolExecutionOutcome::ApprovalRequired(Box::new(
+                    approval_req,
+                )))
             }
 
             PolicyDecisionType::Deny => {
@@ -640,7 +671,7 @@ mod tests {
             .unwrap();
 
         let approval_req = match outcome {
-            ToolExecutionOutcome::ApprovalRequired(ar) => ar,
+            ToolExecutionOutcome::ApprovalRequired(ar) => *ar,
             _ => panic!("Expected ApprovalRequired"),
         };
 
@@ -693,7 +724,7 @@ mod tests {
             .unwrap();
 
         let approval_req = match outcome {
-            ToolExecutionOutcome::ApprovalRequired(ar) => ar,
+            ToolExecutionOutcome::ApprovalRequired(ar) => *ar,
             _ => panic!("Expected ApprovalRequired for destructive command"),
         };
 
@@ -762,7 +793,7 @@ mod tests {
             .unwrap();
 
         let approval_req = match outcome {
-            ToolExecutionOutcome::ApprovalRequired(ar) => ar,
+            ToolExecutionOutcome::ApprovalRequired(ar) => *ar,
             _ => panic!("Expected ApprovalRequired"),
         };
 
@@ -827,7 +858,7 @@ mod tests {
             .expect("Schema validation and policy check should succeed");
 
         let approval_req = match stage_res {
-            ToolExecutionOutcome::ApprovalRequired(ar) => ar,
+            ToolExecutionOutcome::ApprovalRequired(ar) => *ar,
             other => panic!("Expected ApprovalRequired, got {:?}", other),
         };
         assert_eq!(approval_req.tool_call_id, "m3-dod-call-1");
@@ -901,6 +932,9 @@ mod tests {
         // Verify tool call record saved in SQLite as COMPLETED
         let tool_call = db.get_tool_call("req-diag-prod-1").unwrap().unwrap();
         assert_eq!(tool_call.status, "COMPLETED");
-        assert_eq!(tool_call.approved_by, Some("POLICY_ENGINE_AUTO_ALLOW".into()));
+        assert_eq!(
+            tool_call.approved_by,
+            Some("POLICY_ENGINE_AUTO_ALLOW".into())
+        );
     }
 }

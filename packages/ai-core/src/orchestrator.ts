@@ -6,13 +6,25 @@
  */
 
 import { ToolDefinition } from '@remote-commander/tool-schema';
+import { PrivacySettings } from '@remote-commander/shared-types';
 import { ChatMessage, ToolCallRequest, wrapUntrustedContent } from './messages.js';
 import { AIProvider } from './provider.js';
+import { sanitizeToolOutputForAI } from './privacy.js';
+
+export interface FallbackEvent {
+  fromProvider: string;
+  toProvider: string;
+  reason: string;
+  iteration: number;
+  timestamp: string;
+}
 
 export interface LoopLimits {
   maxIterations: number;
   maxExecutionDurationMs: number;
   maxOutputCharsPerTool: number;
+  privacySettings?: Partial<PrivacySettings> | undefined;
+  fallbackProviders?: AIProvider[] | undefined;
 }
 
 export const DEFAULT_LOOP_LIMITS: LoopLimits = {
@@ -23,7 +35,13 @@ export const DEFAULT_LOOP_LIMITS: LoopLimits = {
 
 export interface OrchestrationStep {
   iteration: number;
-  type: 'AI_THINKING' | 'TOOL_REQUESTED' | 'POLICY_EVALUATED' | 'TOOL_EXECUTED' | 'FINAL_ANSWER';
+  type:
+    | 'AI_THINKING'
+    | 'TOOL_REQUESTED'
+    | 'POLICY_EVALUATED'
+    | 'TOOL_EXECUTED'
+    | 'FINAL_ANSWER'
+    | 'PROVIDER_FALLBACK';
   details: Record<string, unknown>;
   timestamp: string;
 }
@@ -44,6 +62,7 @@ export interface OrchestrationCallbacks {
   onToolExecuted?: (toolCall: ToolCallRequest, output: string) => void;
   onApprovalRequired?: (approval: unknown) => void;
   onStep?: (step: OrchestrationStep) => void;
+  onFallbackTriggered?: (fallback: FallbackEvent) => void;
 }
 
 export interface OrchestrationResult {
@@ -53,17 +72,30 @@ export interface OrchestrationResult {
   iterations: number;
   cancelled: boolean;
   requiresApproval?: unknown | undefined;
+  activeProviderId?: string | undefined;
 }
 
 export class ToolLoopOrchestrator {
   private provider: AIProvider;
   private tools: ToolDefinition[];
   private limits: LoopLimits;
+  private fallbackProviders: AIProvider[];
 
-  constructor(provider: AIProvider, tools: ToolDefinition[], limits: Partial<LoopLimits> = {}) {
+  constructor(
+    provider: AIProvider,
+    tools: ToolDefinition[],
+    limits: Partial<LoopLimits> = {},
+    fallbackProviders: AIProvider[] = [],
+  ) {
     this.provider = provider;
     this.tools = tools;
     this.limits = { ...DEFAULT_LOOP_LIMITS, ...limits };
+    this.fallbackProviders =
+      fallbackProviders.length > 0 ? fallbackProviders : (this.limits.fallbackProviders ?? []);
+  }
+
+  public getProviderChain(): AIProvider[] {
+    return [this.provider, ...this.fallbackProviders];
   }
 
   async run(
@@ -78,6 +110,8 @@ export class ToolLoopOrchestrator {
     const startTime = Date.now();
     let iteration = 0;
     let finalText = '';
+    const providerChain = [this.provider, ...this.fallbackProviders];
+    let activeProviderIndex = 0;
 
     while (iteration < this.limits.maxIterations) {
       iteration++;
@@ -97,57 +131,101 @@ export class ToolLoopOrchestrator {
           steps,
           iterations: iteration,
           cancelled: true,
+          activeProviderId: providerChain[activeProviderIndex]?.providerId,
         };
       }
 
-      // Stream chat chunk from active provider
+      // Stream chat chunk from active provider with fallback chain
       const toolCallMap = new Map<
         string,
         { id: string; toolName?: string | undefined; argsDelta: string }
       >();
       let textChunkBuffer = '';
+      let streamSuccess = false;
 
-      const stepThinking: OrchestrationStep = {
-        iteration,
-        type: 'AI_THINKING',
-        details: { model, messageCount: workingMessages.length },
-        timestamp: new Date().toISOString(),
-      };
-      steps.push(stepThinking);
-      callbacks.onStep?.(stepThinking);
+      while (activeProviderIndex < providerChain.length && !streamSuccess) {
+        const currentProvider = providerChain[activeProviderIndex]!;
+        textChunkBuffer = '';
+        toolCallMap.clear();
 
-      for await (const chunk of this.provider.streamChat(
-        { model, messages: workingMessages, tools: this.tools },
-        signal,
-      )) {
-        if (signal?.aborted) {
-          return {
-            finalText: textChunkBuffer,
-            messages: workingMessages,
-            steps,
-            iterations: iteration,
-            cancelled: true,
-          };
-        }
+        const stepThinking: OrchestrationStep = {
+          iteration,
+          type: 'AI_THINKING',
+          details: {
+            model,
+            provider: currentProvider.providerId,
+            messageCount: workingMessages.length,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        steps.push(stepThinking);
+        callbacks.onStep?.(stepThinking);
 
-        if (chunk.type === 'TEXT_DELTA') {
-          textChunkBuffer += chunk.delta;
-          callbacks.onToken?.(chunk.delta);
-        } else if (chunk.type === 'TOOL_CALL_DELTA') {
-          const entry: {
-            id: string;
-            toolName?: string | undefined;
-            argsDelta: string;
-          } = toolCallMap.get(chunk.callId) ?? {
-            id: chunk.callId,
-            toolName: chunk.toolName,
-            argsDelta: '',
-          };
-          if (chunk.toolName) {
-            entry.toolName = chunk.toolName;
+        try {
+          for await (const chunk of currentProvider.streamChat(
+            { model, messages: workingMessages, tools: this.tools },
+            signal,
+          )) {
+            if (signal?.aborted) {
+              return {
+                finalText: textChunkBuffer,
+                messages: workingMessages,
+                steps,
+                iterations: iteration,
+                cancelled: true,
+                activeProviderId: currentProvider.providerId,
+              };
+            }
+
+            if (chunk.type === 'TEXT_DELTA') {
+              textChunkBuffer += chunk.delta;
+              callbacks.onToken?.(chunk.delta);
+            } else if (chunk.type === 'TOOL_CALL_DELTA') {
+              const entry: {
+                id: string;
+                toolName?: string | undefined;
+                argsDelta: string;
+              } = toolCallMap.get(chunk.callId) ?? {
+                id: chunk.callId,
+                toolName: chunk.toolName,
+                argsDelta: '',
+              };
+              if (chunk.toolName) {
+                entry.toolName = chunk.toolName;
+              }
+              entry.argsDelta += chunk.argsDelta;
+              toolCallMap.set(chunk.callId, entry);
+            }
           }
-          entry.argsDelta += chunk.argsDelta;
-          toolCallMap.set(chunk.callId, entry);
+          streamSuccess = true;
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const nextIndex = activeProviderIndex + 1;
+          if (nextIndex < providerChain.length) {
+            const nextProvider = providerChain[nextIndex]!;
+            const fallbackEvent: FallbackEvent = {
+              fromProvider: currentProvider.providerId,
+              toProvider: nextProvider.providerId,
+              reason: errMsg,
+              iteration,
+              timestamp: new Date().toISOString(),
+            };
+            const stepFallback: OrchestrationStep = {
+              iteration,
+              type: 'PROVIDER_FALLBACK',
+              details: { ...fallbackEvent },
+              timestamp: fallbackEvent.timestamp,
+            };
+            steps.push(stepFallback);
+            callbacks.onStep?.(stepFallback);
+            callbacks.onFallbackTriggered?.(fallbackEvent);
+
+            activeProviderIndex = nextIndex;
+          } else {
+            throw new Error(
+              `AI provider '${currentProvider.providerId}' failed and no fallback providers remain: ${errMsg}`,
+            );
+          }
         }
       }
 
@@ -181,6 +259,7 @@ export class ToolLoopOrchestrator {
           steps,
           iterations: iteration,
           cancelled: false,
+          activeProviderId: providerChain[activeProviderIndex]?.providerId,
         };
       }
 
@@ -214,19 +293,21 @@ export class ToolLoopOrchestrator {
             iterations: iteration,
             cancelled: false,
             requiresApproval: execRes.approvalRequest,
+            activeProviderId: providerChain[activeProviderIndex]?.providerId,
           };
         }
 
-        // Apply output size truncation limit
-        let safeOutput = execRes.output;
-        if (safeOutput.length > this.limits.maxOutputCharsPerTool) {
-          safeOutput =
-            safeOutput.slice(0, this.limits.maxOutputCharsPerTool) +
-            '\n[... Output truncated to size limit ...]';
-        }
+        // Sanitize output (M14: secret redaction, restricted-data mode, token-aware truncation)
+        const sanitized = sanitizeToolOutputForAI(execRes.output, {
+          toolName: call.toolName,
+          privacySettings: {
+            maxCharsPerToolOutput: this.limits.maxOutputCharsPerTool,
+            ...this.limits.privacySettings,
+          },
+        });
 
-        // Wrap output in untrusted boundary (Security Gate G)
-        const wrappedOutput = wrapUntrustedContent(safeOutput, call.toolName);
+        // Wrap output in untrusted boundary (Security Gate G & M14 prompt injection mitigation)
+        const wrappedOutput = wrapUntrustedContent(sanitized.content, call.toolName);
 
         workingMessages.push({
           role: 'tool',
@@ -240,13 +321,16 @@ export class ToolLoopOrchestrator {
           details: {
             toolName: call.toolName,
             success: execRes.success,
-            outputLength: safeOutput.length,
+            outputLength: sanitized.sanitizedBytes,
+            truncated: sanitized.isTruncated,
+            restrictedMode: sanitized.isRestrictedMode,
+            redactionsCount: sanitized.redactionResult.totalRedactions,
           },
           timestamp: new Date().toISOString(),
         };
         steps.push(stepExecuted);
         callbacks.onStep?.(stepExecuted);
-        callbacks.onToolExecuted?.(call, safeOutput);
+        callbacks.onToolExecuted?.(call, sanitized.content);
       }
     }
 
@@ -256,6 +340,7 @@ export class ToolLoopOrchestrator {
       steps,
       iterations: iteration,
       cancelled: false,
+      activeProviderId: providerChain[activeProviderIndex]?.providerId,
     };
   }
 }

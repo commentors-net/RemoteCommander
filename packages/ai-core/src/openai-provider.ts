@@ -1,10 +1,17 @@
 /**
  * OpenAI-Compatible AI Provider Implementation
  * Supports OpenAI, Ollama (/v1), LMStudio, OpenRouter, and compatible endpoints.
- * Authoritative baseline defined in Master Specification §18.
+ * Authoritative baseline defined in Master Specification §16 (M13) & §18.
  */
 
-import { AIProvider, ChatRequest, ChatStreamChunk, ModelInfo, UsageInfo } from './provider.js';
+import {
+  AIProvider,
+  ChatRequest,
+  ChatStreamChunk,
+  ModelInfo,
+  UsageInfo,
+  parseHTTPError,
+} from './provider.js';
 
 export interface OpenAIProviderOptions {
   baseUrl?: string | undefined;
@@ -21,7 +28,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   constructor(options: OpenAIProviderOptions = {}) {
     this.providerId = options.providerId ?? 'openai';
-    this.baseUrl = options.baseUrl ?? 'https://api.openai.com/v1';
+    this.baseUrl = (options.baseUrl ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
     this.apiKey = options.apiKey;
     this.customModels = options.customModels ?? [
       {
@@ -30,6 +37,8 @@ export class OpenAICompatibleProvider implements AIProvider {
         provider: 'openai',
         contextWindow: 128_000,
         supportsTools: true,
+        supportsStreaming: true,
+        isDefault: true,
       },
       {
         id: 'gpt-4o-mini',
@@ -37,6 +46,15 @@ export class OpenAICompatibleProvider implements AIProvider {
         provider: 'openai',
         contextWindow: 128_000,
         supportsTools: true,
+        supportsStreaming: true,
+      },
+      {
+        id: 'o3-mini',
+        name: 'o3-mini',
+        provider: 'openai',
+        contextWindow: 200_000,
+        supportsTools: true,
+        supportsStreaming: true,
       },
     ];
   }
@@ -72,6 +90,30 @@ export class OpenAICompatibleProvider implements AIProvider {
       completionTokens: obj.completion_tokens ?? 0,
       totalTokens: obj.total_tokens ?? 0,
     };
+  }
+
+  async testConnection(): Promise<{ ok: boolean; error?: string | undefined }> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (this.apiKey) {
+        headers.Authorization = `Bearer ${this.apiKey}`;
+      }
+      const response = await fetch(`${this.baseUrl}/models`, {
+        method: 'GET',
+        headers,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        const err = parseHTTPError(this.providerId, response.status, text);
+        return { ok: false, error: err.message };
+      }
+      return { ok: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: `Connection failed: ${msg}` };
+    }
   }
 
   async *streamChat(request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatStreamChunk> {
@@ -142,11 +184,17 @@ export class OpenAICompatibleProvider implements AIProvider {
       fetchOptions.signal = signal;
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, fetchOptions);
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, fetchOptions);
+    } catch (networkErr: unknown) {
+      const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+      throw parseHTTPError(this.providerId, 0, `Network request failed: ${msg}`);
+    }
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`OpenAI Provider error (${response.status}): ${errText}`);
+      throw parseHTTPError(this.providerId, response.status, errText);
     }
 
     if (!response.body) {

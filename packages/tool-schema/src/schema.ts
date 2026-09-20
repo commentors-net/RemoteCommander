@@ -19,7 +19,7 @@ export interface ToolInputSchema {
 export interface ToolDefinition {
   name: string;
   description: string;
-  category: 'local' | 'ssh' | 'server' | 'cpanel';
+  category: 'local' | 'ssh' | 'server' | 'cpanel' | 'safety' | 'multi_server';
   risk: RiskLevel;
   inputSchema: ToolInputSchema;
   timeoutSeconds: number;

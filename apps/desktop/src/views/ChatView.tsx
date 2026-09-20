@@ -1,13 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Terminal, AlertTriangle, Check, X, Square, Bot, Sparkles } from 'lucide-react';
-import { ServerProfile } from '@remote-commander/shared-types';
 import {
-  MockAIProvider,
-  ToolLoopOrchestrator,
-  ChatMessage,
-  ToolCallRequest,
-} from '@remote-commander/ai-core';
-import { Bridge, ApprovalRequest, ToolResult } from '../bridge.js';
+  Send,
+  Terminal,
+  AlertTriangle,
+  Check,
+  X,
+  Square,
+  Bot,
+  Sparkles,
+  Cpu,
+  ShieldCheck,
+} from 'lucide-react';
+import {
+  ServerProfile,
+  PrivacySettings,
+  DEFAULT_PRIVACY_SETTINGS,
+} from '@remote-commander/shared-types';
+import { ToolLoopOrchestrator, ChatMessage, ToolCallRequest } from '@remote-commander/ai-core';
+import {
+  Bridge,
+  ApprovalRequest,
+  ToolResult,
+  AIProviderConfig,
+  PROVIDER_CAPABILITIES,
+} from '../bridge.js';
 
 interface ChatViewProps {
   activeServer?: ServerProfile | undefined;
@@ -24,6 +40,8 @@ interface MessageItem {
         durationMs?: number | undefined;
         target?: string | undefined;
         truncated?: boolean | undefined;
+        redactionsCount?: number | undefined;
+        restrictedMode?: boolean | undefined;
       }
     | undefined;
 }
@@ -41,6 +59,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
   const [typedAck, setTypedAck] = useState('');
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AIProviderConfig | null>(null);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(DEFAULT_PRIVACY_SETTINGS);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -59,6 +79,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
 
   useEffect(() => {
     refreshPendingApprovals();
+    Bridge.getAIConfig().then(setAiConfig).catch(console.error);
+    Bridge.getPrivacySettings().then(setPrivacySettings).catch(console.error);
   }, []);
 
   const runAiToolLoop = async (userPrompt: string) => {
@@ -90,11 +112,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
     ]);
 
     try {
+      const currentConfig = await Bridge.getAIConfig();
+      setAiConfig(currentConfig);
+      const currentPrivacy = await Bridge.getPrivacySettings();
+      setPrivacySettings(currentPrivacy);
       const tools = await Bridge.listToolDefinitions();
-      const provider = new MockAIProvider();
+      const provider = await Bridge.getActiveAIProvider(currentConfig);
       const orchestrator = new ToolLoopOrchestrator(provider, tools, {
         maxIterations: 10,
-        maxOutputCharsPerTool: 50_000,
+        maxOutputCharsPerTool: currentPrivacy.maxCharsPerToolOutput,
+        privacySettings: currentPrivacy,
       });
 
       const chatHistory: ChatMessage[] = messages
@@ -112,12 +139,19 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
             durationMs?: number | undefined;
             target?: string | undefined;
             truncated?: boolean | undefined;
+            redactionsCount?: number | undefined;
+            restrictedMode?: boolean | undefined;
           }
         | undefined = undefined;
 
+      const targetModel =
+        currentConfig.model ||
+        PROVIDER_CAPABILITIES[currentConfig.provider]?.defaultModel ||
+        'gpt-4o';
+
       const result = await orchestrator.run(
         chatHistory,
-        'mock-gpt-4o',
+        targetModel,
         async (call: ToolCallRequest) => {
           let parsedArgs = {};
           try {
@@ -184,6 +218,25 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                 return msg;
               }),
             );
+          },
+          onStep: (step) => {
+            if (step.type === 'TOOL_EXECUTED' && currentToolCallDetails) {
+              const details = {
+                name: currentToolCallDetails.name,
+                output: currentToolCallDetails.output,
+                durationMs: currentToolCallDetails.durationMs,
+                target: currentToolCallDetails.target,
+                truncated: Boolean(step.details?.truncated),
+                restrictedMode: Boolean(step.details?.restrictedMode),
+                redactionsCount: Number(step.details?.redactionsCount ?? 0),
+              };
+              currentToolCallDetails = details;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMsgId ? { ...msg, toolCall: details } : msg,
+                ),
+              );
+            }
           },
         },
         abortController.signal,
@@ -294,6 +347,62 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
 
   return (
     <div className="chat-container">
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 16px',
+          borderBottom: '1px solid #30363d',
+          backgroundColor: '#161b22',
+          fontSize: '12px',
+          color: '#8b949e',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Bot size={14} color="#58a6ff" />
+          <span>
+            Target:{' '}
+            <strong style={{ color: '#c9d1d9' }}>
+              {activeServer?.name ?? 'Local Workstation'}
+            </strong>
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Cpu size={14} color="#3fb950" />
+          <span>
+            AI Provider:{' '}
+            <strong style={{ color: '#c9d1d9', textTransform: 'capitalize' }}>
+              {aiConfig?.provider ?? 'OpenAI'}
+            </strong>{' '}
+            <span style={{ color: '#8b949e' }}>({aiConfig?.model ?? 'gpt-4o'})</span>
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <ShieldCheck
+            size={14}
+            color={privacySettings.restrictedDataMode ? '#d29922' : '#3fb950'}
+          />
+          <span>
+            Privacy:{' '}
+            <strong
+              style={{
+                color: privacySettings.restrictedDataMode
+                  ? '#d29922'
+                  : aiConfig?.provider === 'ollama'
+                    ? '#3fb950'
+                    : '#58a6ff',
+              }}
+            >
+              {privacySettings.restrictedDataMode
+                ? 'Restricted Data'
+                : aiConfig?.provider === 'ollama'
+                  ? 'Local On-Device'
+                  : 'Cloud TLS'}
+            </strong>
+          </span>
+        </div>
+      </div>
       <div className="chat-history">
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
@@ -357,6 +466,34 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                         TRUNCATED
                       </span>
                     )}
+                    {m.toolCall.restrictedMode && (
+                      <span
+                        style={{
+                          backgroundColor: 'rgba(88, 166, 255, 0.15)',
+                          border: '1px solid #58a6ff',
+                          borderRadius: '4px',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          color: '#58a6ff',
+                        }}
+                      >
+                        RESTRICTED DATA
+                      </span>
+                    )}
+                    {Boolean(m.toolCall.redactionsCount && m.toolCall.redactionsCount > 0) && (
+                      <span
+                        style={{
+                          backgroundColor: 'rgba(210, 153, 34, 0.15)',
+                          border: '1px solid #d29922',
+                          borderRadius: '4px',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          color: '#d29922',
+                        }}
+                      >
+                        {m.toolCall.redactionsCount} REDACTED
+                      </span>
+                    )}
                   </span>
                   {m.toolCall.durationMs !== undefined && (
                     <span style={{ color: '#8b949e', fontSize: '11px' }}>
@@ -390,19 +527,58 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
             </div>
 
             <div style={{ fontSize: '13px', color: '#c9d1d9', marginBottom: '8px' }}>
-              <div>
-                <strong>Tool:</strong> <code>{pendingApproval.tool_name}</code>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}
+              >
+                <div>
+                  <strong>Tool:</strong> <code>{pendingApproval.tool_name}</code>
+                </div>
+                {pendingApproval.environment && (
+                  <span
+                    style={{
+                      backgroundColor:
+                        pendingApproval.environment === 'PRODUCTION' ? '#b91c1c' : '#1e3a8a',
+                      color: '#ffffff',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {pendingApproval.environment}
+                  </span>
+                )}
               </div>
               {pendingApproval.server_name && (
                 <div>
-                  <strong>Target Server:</strong> {pendingApproval.server_name} (
-                  {pendingApproval.environment})
+                  <strong>Target Server:</strong> {pendingApproval.server_name}
+                </div>
+              )}
+              {pendingApproval.authenticated_user && (
+                <div>
+                  <strong>Authenticated User:</strong>{' '}
+                  <code>{pendingApproval.authenticated_user}</code>
+                </div>
+              )}
+              {pendingApproval.target_resource && (
+                <div>
+                  <strong>Target Resource:</strong> <code>{pendingApproval.target_resource}</code>
                 </div>
               )}
               <div>
                 <strong>Reason:</strong> {pendingApproval.decision_reason}
               </div>
-              <div style={{ marginTop: '4px' }}>
+              {pendingApproval.likely_impact && (
+                <div style={{ color: '#ff7b72', marginTop: '4px' }}>
+                  <strong>Likely Impact:</strong> {pendingApproval.likely_impact}
+                </div>
+              )}
+              {pendingApproval.rollback_state && (
+                <div style={{ color: '#7ee787', marginTop: '2px' }}>
+                  <strong>Rollback State:</strong> {pendingApproval.rollback_state}
+                </div>
+              )}
+              <div style={{ marginTop: '6px' }}>
                 <strong>Arguments:</strong>
                 <pre
                   style={{

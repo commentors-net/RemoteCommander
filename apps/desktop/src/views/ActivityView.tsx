@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuditEvent } from '@remote-commander/shared-types';
-import { Bridge, ToolCallRecord } from '../bridge.js';
+import { Bridge, ToolCallRecord, SafetyBackupRecord } from '../bridge.js';
 import {
   Activity,
   RefreshCw,
@@ -10,25 +10,85 @@ import {
   XCircle,
   Clock,
   Wrench,
+  RotateCcw,
+  ShieldCheck,
+  Download,
 } from 'lucide-react';
 
 export const ActivityView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'audit' | 'tool_calls'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'tool_calls' | 'backups'>('audit');
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCallRecord[]>([]);
+  const [backups, setBackups] = useState<SafetyBackupRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+  const [restoreMessage, setRestoreMessage] = useState<{ text: string; isError: boolean } | null>(
+    null,
+  );
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [auditData, toolCallData] = await Promise.all([
+      const [auditData, toolCallData, backupData] = await Promise.all([
         Bridge.listAuditEvents(50),
         Bridge.listToolCalls(50),
+        Bridge.safetyListBackups(),
       ]);
       setEvents(auditData);
       setToolCalls(toolCallData);
+      setBackups(backupData);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+
+  const handleExportAudit = async (format: 'json' | 'csv') => {
+    setExportingFormat(format);
+    try {
+      const data = await Bridge.exportAuditLog(format);
+      const blob = new Blob([data], {
+        type: format === 'json' ? 'application/json' : 'text/csv',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `remotecommander-audit-${new Date().toISOString().slice(0, 10)}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      alert(`Export failed: ${(err as Error)?.message ?? String(err)}`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleRestore = async (backup: SafetyBackupRecord) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to restore '${backup.file_path}' from backup '${backup.backup_path}' on server '${backup.server_id}'?`,
+      )
+    ) {
+      return;
+    }
+    setRestoringBackupId(backup.id);
+    setRestoreMessage(null);
+    try {
+      await Bridge.safetyRestoreBackup(backup.server_id, backup.file_path, backup.backup_path);
+      setRestoreMessage({
+        text: `Successfully restored ${backup.file_path} from ${backup.backup_path}`,
+        isError: false,
+      });
+      await loadData();
+    } catch (err: unknown) {
+      setRestoreMessage({
+        text: `Failed to restore: ${(err as Error)?.message ?? String(err)}`,
+        isError: true,
+      });
+    } finally {
+      setRestoringBackupId(null);
+      setTimeout(() => setRestoreMessage(null), 4000);
     }
   };
 
@@ -140,14 +200,36 @@ export const ActivityView: React.FC = () => {
           <Activity size={20} color="#58a6ff" />
           <h2>Audit & Tool Activity Log</h2>
         </div>
-        <button
-          className="btn"
-          onClick={loadData}
-          disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => handleExportAudit('json')}
+            disabled={exportingFormat !== null}
+            title="Export full audit log as JSON"
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+          >
+            <Download size={13} /> Export JSON
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => handleExportAudit('csv')}
+            disabled={exportingFormat !== null}
+            title="Export full audit log as CSV"
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+          >
+            <Download size={13} /> Export CSV
+          </button>
+          <button
+            className="btn"
+            onClick={loadData}
+            disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
@@ -165,7 +247,32 @@ export const ActivityView: React.FC = () => {
         >
           <Wrench size={14} /> Tool Calls ({toolCalls.length})
         </button>
+        <button
+          className={`btn ${activeTab === 'backups' ? 'btn-primary' : ''}`}
+          onClick={() => setActiveTab('backups')}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <ShieldCheck size={14} /> Safety & Backups ({backups.length})
+        </button>
       </div>
+
+      {restoreMessage && (
+        <div
+          style={{
+            padding: '10px 14px',
+            marginBottom: '16px',
+            borderRadius: '6px',
+            backgroundColor: restoreMessage.isError
+              ? 'rgba(248, 81, 73, 0.15)'
+              : 'rgba(63, 185, 80, 0.15)',
+            border: `1px solid ${restoreMessage.isError ? '#f85149' : '#3fb950'}`,
+            color: restoreMessage.isError ? '#f85149' : '#3fb950',
+            fontSize: '13px',
+          }}
+        >
+          {restoreMessage.text}
+        </div>
+      )}
 
       {activeTab === 'audit' ? (
         <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -207,7 +314,7 @@ export const ActivityView: React.FC = () => {
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : activeTab === 'tool_calls' ? (
         <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
@@ -253,6 +360,95 @@ export const ActivityView: React.FC = () => {
                       }}
                     >
                       {tc.arguments_json}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Created At</th>
+                <th>Server</th>
+                <th>Original File</th>
+                <th>Backup File Path</th>
+                <th>Reason / Created By</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {backups.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    style={{ textAlign: 'center', color: '#8b949e', padding: '24px' }}
+                  >
+                    No safety backups created yet.
+                  </td>
+                </tr>
+              ) : (
+                backups.map((b) => (
+                  <tr key={b.id}>
+                    <td style={{ color: '#8b949e', whiteSpace: 'nowrap' }}>
+                      {new Date(b.created_at).toLocaleTimeString()}
+                    </td>
+                    <td>{b.server_id}</td>
+                    <td style={{ fontWeight: 600, color: '#58a6ff' }}>{b.file_path}</td>
+                    <td
+                      style={{
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        color: '#8b949e',
+                      }}
+                    >
+                      {b.backup_path}
+                    </td>
+                    <td style={{ fontSize: '12px' }}>
+                      <div>{b.reason}</div>
+                      <div style={{ color: '#8b949e', fontSize: '11px' }}>by {b.created_by}</div>
+                    </td>
+                    <td>
+                      {b.restored ? (
+                        <span
+                          className="status-badge"
+                          style={{ backgroundColor: 'rgba(210,153,34,0.15)', color: '#d29922' }}
+                        >
+                          Restored
+                        </span>
+                      ) : (
+                        <span
+                          className="status-badge"
+                          style={{ backgroundColor: 'rgba(63,185,80,0.15)', color: '#3fb950' }}
+                        >
+                          Active
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                        disabled={restoringBackupId === b.id}
+                        onClick={() => handleRestore(b)}
+                        title="Restore this file from backup"
+                      >
+                        <RotateCcw
+                          size={12}
+                          className={restoringBackupId === b.id ? 'animate-spin' : ''}
+                        />
+                        Restore
+                      </button>
                     </td>
                   </tr>
                 ))

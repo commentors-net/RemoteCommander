@@ -1,0 +1,113 @@
+name: Release & Packaging Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  verify-supply-chain:
+    name: Supply Chain Verification & SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Supply Chain Security (Lockfiles, Secrets, CycloneDX SBOM)
+        run: npm run supply-chain:verify
+
+      - name: Upload SBOM & Checksum Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-sbom
+          path: |
+            dist/sbom.cyclonedx.json
+            dist/SHA256SUMS
+
+  build-packages:
+    name: Package Release (${{ matrix.platform }})
+    needs: [verify-supply-chain]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
+            args: '--bundles nsis'
+          - platform: 'macos-latest'
+            target: 'x86_64-apple-darwin'
+            args: '--bundles dmg,app'
+          - platform: 'ubuntu-22.04'
+            target: 'x86_64-unknown-linux-gnu'
+            args: '--bundles deb,appimage'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Generate CycloneDX SBOM & Checksums
+        run: npm run sbom:generate
+
+      - name: Build Desktop Application Bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'RemoteCommander ${{ github.ref_name }}'
+          releaseBody: |
+            ## RemoteCommander Release ${{ github.ref_name }}
+            
+            ### Security & Integrity Verification
+            - Cryptographically signed with release Ed25519 key.
+            - CycloneDX v1.5 Software Bill of Materials (SBOM) included.
+            - Strict Content Security Policy (CSP) enforced.
+            - All release bundle SHA-256 hashes published in `SHA256SUMS`.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

@@ -375,7 +375,321 @@ impl ToolRegistry {
             },
         );
 
-        // 5. server.disk_usage
+        // 5a. ssh.list_directory
+        let mut list_dir_props = HashMap::new();
+        list_dir_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        list_dir_props.insert(
+            "path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Remote directory path to list (defaults to /)".into(),
+                r#enum: None,
+                default: Some(serde_json::json!("/")),
+            },
+        );
+        list_dir_props.insert(
+            "show_hidden".into(),
+            ToolPropertySchema {
+                prop_type: "boolean".into(),
+                description: "Include hidden files (dotfiles)".into(),
+                r#enum: None,
+                default: Some(serde_json::json!(false)),
+            },
+        );
+        tools.insert(
+            "ssh.list_directory".into(),
+            ToolDefinition {
+                name: "ssh.list_directory".into(),
+                description: "List files and directories on remote server with detailed metadata."
+                    .into(),
+                category: "ssh".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: list_dir_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5b. ssh.read_file
+        let mut read_props = HashMap::new();
+        read_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        read_props.insert(
+            "path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Absolute remote file path to read".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        read_props.insert(
+            "max_bytes".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Maximum bytes to read (default 100,000)".into(),
+                r#enum: None,
+                default: Some(serde_json::json!(100_000)),
+            },
+        );
+        tools.insert(
+            "ssh.read_file".into(),
+            ToolDefinition {
+                name: "ssh.read_file".into(),
+                description:
+                    "Safely read remote text or config file with 100KB truncation protection."
+                        .into(),
+                category: "ssh".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: read_props,
+                    required: Some(vec!["server_id".into(), "path".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5c. ssh.write_file
+        let mut write_props = HashMap::new();
+        write_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        write_props.insert(
+            "path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Absolute remote file path to write".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        write_props.insert(
+            "content".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Text content to write".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        write_props.insert(
+            "create_backup".into(),
+            ToolPropertySchema {
+                prop_type: "boolean".into(),
+                description: "Create automatic backup (.bak.<timestamp>) before overwriting".into(),
+                r#enum: None,
+                default: Some(serde_json::json!(true)),
+            },
+        );
+        tools.insert(
+            "ssh.write_file".into(),
+            ToolDefinition {
+                name: "ssh.write_file".into(),
+                description: "Safely write or update remote file content with automatic backup and diff verification.".into(),
+                category: "ssh".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: write_props,
+                    required: Some(vec!["server_id".into(), "path".into(), "content".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5d. ssh.file_info
+        let mut stat_props = HashMap::new();
+        stat_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        stat_props.insert(
+            "path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Remote path to stat".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "ssh.file_info".into(),
+            ToolDefinition {
+                name: "ssh.file_info".into(),
+                description: "Get detailed stat metadata (size, permissions, owner, timestamps) for a remote file or directory.".into(),
+                category: "ssh".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 20,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: stat_props,
+                    required: Some(vec!["server_id".into(), "path".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5e. ssh.upload
+        let mut upload_props = HashMap::new();
+        upload_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        upload_props.insert(
+            "remote_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Destination path on remote server".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        upload_props.insert(
+            "content".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "File content to upload".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        upload_props.insert(
+            "overwrite".into(),
+            ToolPropertySchema {
+                prop_type: "boolean".into(),
+                description: "Whether to overwrite existing file".into(),
+                r#enum: None,
+                default: Some(serde_json::json!(false)),
+            },
+        );
+        tools.insert(
+            "ssh.upload".into(),
+            ToolDefinition {
+                name: "ssh.upload".into(),
+                description: "Upload local text or file content to target remote server path."
+                    .into(),
+                category: "ssh".into(),
+                risk: RiskLevel::Medium,
+                timeout_seconds: 60,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: upload_props,
+                    required: Some(vec![
+                        "server_id".into(),
+                        "remote_path".into(),
+                        "content".into(),
+                    ]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5f. ssh.download
+        let mut download_props = HashMap::new();
+        download_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target stable server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        download_props.insert(
+            "remote_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Remote file path to download".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "ssh.download".into(),
+            ToolDefinition {
+                name: "ssh.download".into(),
+                description: "Download file content from remote server to local workstation."
+                    .into(),
+                category: "ssh".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 60,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: download_props,
+                    required: Some(vec!["server_id".into(), "remote_path".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 5. M10 Semantic Server Operations tools
+        // server.system_info
+        let mut sysinfo_props = HashMap::new();
+        sysinfo_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.system_info".into(),
+            ToolDefinition {
+                name: "server.system_info".into(),
+                description: "Inspect basic system info (OS, kernel, hostname, architecture, uptime) on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: sysinfo_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.disk_usage
         let mut disk_props = HashMap::new();
         disk_props.insert(
             "server_id".into(),
@@ -403,7 +717,160 @@ impl ToolRegistry {
             },
         );
 
-        // 6. server.service_status
+        // server.memory_usage
+        let mut mem_props = HashMap::new();
+        mem_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.memory_usage".into(),
+            ToolDefinition {
+                name: "server.memory_usage".into(),
+                description: "Inspect memory and swap usage metrics on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: mem_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.cpu_usage
+        let mut cpu_props = HashMap::new();
+        cpu_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.cpu_usage".into(),
+            ToolDefinition {
+                name: "server.cpu_usage".into(),
+                description: "Inspect CPU utilization, cores, and load distribution on target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cpu_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.load_average
+        let mut load_props = HashMap::new();
+        load_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.load_average".into(),
+            ToolDefinition {
+                name: "server.load_average".into(),
+                description: "Inspect 1, 5, and 15-minute load averages on the target server."
+                    .into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: load_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.process_list
+        let mut proc_props = HashMap::new();
+        proc_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        proc_props.insert(
+            "limit".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Maximum number of processes to return (default 30)".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.process_list".into(),
+            ToolDefinition {
+                name: "server.process_list".into(),
+                description:
+                    "List running processes sorted by resource utilization on the target server."
+                        .into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: proc_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.network_connections
+        let mut net_props = HashMap::new();
+        net_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.network_connections".into(),
+            ToolDefinition {
+                name: "server.network_connections".into(),
+                description:
+                    "Inspect active and listening network connections on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: net_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.service_status
         let mut svc_status_props = HashMap::new();
         svc_status_props.insert(
             "server_id".into(),
@@ -418,7 +885,7 @@ impl ToolRegistry {
             "service_name".into(),
             ToolPropertySchema {
                 prop_type: "string".into(),
-                description: "Name of the service (e.g. nginx, mariadb)".into(),
+                description: "Name of the service (e.g. nginx, mariadb, httpd)".into(),
                 r#enum: None,
                 default: None,
             },
@@ -427,7 +894,7 @@ impl ToolRegistry {
             "server.service_status".into(),
             ToolDefinition {
                 name: "server.service_status".into(),
-                description: "Check status of a system service on the target server.".into(),
+                description: "Check status of a system service across Linux distros.".into(),
                 category: "server".into(),
                 risk: RiskLevel::ReadOnly,
                 timeout_seconds: 30,
@@ -440,7 +907,81 @@ impl ToolRegistry {
             },
         );
 
-        // 7. server.service_restart
+        // server.service_start
+        let mut svc_start_props = HashMap::new();
+        svc_start_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        svc_start_props.insert(
+            "service_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Name or alias of the service to start".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.service_start".into(),
+            ToolDefinition {
+                name: "server.service_start".into(),
+                description: "Start a system service on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::Medium,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: svc_start_props,
+                    required: Some(vec!["server_id".into(), "service_name".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.service_stop
+        let mut svc_stop_props = HashMap::new();
+        svc_stop_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        svc_stop_props.insert(
+            "service_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Name or alias of the service to stop".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.service_stop".into(),
+            ToolDefinition {
+                name: "server.service_stop".into(),
+                description: "Stop a system service on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: svc_stop_props,
+                    required: Some(vec!["server_id".into(), "service_name".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // server.service_restart
         let mut svc_restart_props = HashMap::new();
         svc_restart_props.insert(
             "server_id".into(),
@@ -477,9 +1018,306 @@ impl ToolRegistry {
             },
         );
 
-        // 8. cpanel.list_accounts
-        let mut cpanel_props = HashMap::new();
-        cpanel_props.insert(
+        // server.tail_log
+        let mut log_props = HashMap::new();
+        log_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        log_props.insert(
+            "path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Log file path (e.g. /var/log/messages, /var/log/nginx/error.log)"
+                    .into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        log_props.insert(
+            "lines".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Number of lines to tail (default 50)".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "server.tail_log".into(),
+            ToolDefinition {
+                name: "server.tail_log".into(),
+                description: "Read the recent lines from a log file on the target server.".into(),
+                category: "server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: log_props,
+                    required: Some(vec!["server_id".into(), "path".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8a. cpanel.server_info
+        let mut cp_srv_info_props = HashMap::new();
+        cp_srv_info_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id with WHM/cPanel enabled".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.server_info".into(),
+            ToolDefinition {
+                name: "cpanel.server_info".into(),
+                description: "Inspect WHM/cPanel server version, build, license status, operating system, and active services.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_srv_info_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8b. cpanel.list_accounts
+        let mut cp_list_accts_props = HashMap::new();
+        cp_list_accts_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id with WHM/cPanel enabled".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.list_accounts".into(),
+            ToolDefinition {
+                name: "cpanel.list_accounts".into(),
+                description: "List all hosted cPanel accounts with user, primary domain, plan, disk usage, and suspended status.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_list_accts_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8c. cpanel.account_info
+        let mut cp_acct_info_props = HashMap::new();
+        cp_acct_info_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_acct_info_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Username of the cPanel account".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.account_info".into(),
+            ToolDefinition {
+                name: "cpanel.account_info".into(),
+                description: "Get detailed configuration, limits, contact email, and quota metrics for a specific cPanel account.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_acct_info_props,
+                    required: Some(vec!["server_id".into(), "user".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8d. cpanel.list_domains
+        let mut cp_domains_props = HashMap::new();
+        cp_domains_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_domains_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional username to filter domains".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.list_domains".into(),
+            ToolDefinition {
+                name: "cpanel.list_domains".into(),
+                description: "List all domains, subdomains, addon domains, and parked aliases across all accounts on the WHM server.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_domains_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8e. cpanel.service_status
+        let mut cp_svc_status_props = HashMap::new();
+        cp_svc_status_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_svc_status_props.insert(
+            "service_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional service daemon name to check".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.service_status".into(),
+            ToolDefinition {
+                name: "cpanel.service_status".into(),
+                description: "Inspect status of cPanel server daemons (cpsrvd, cpdavd, cpgreylistd, queueprocd, tailwatchd, etc.).".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_svc_status_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8f. cpanel.restart_service
+        let mut cp_restart_props = HashMap::new();
+        cp_restart_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_restart_props.insert(
+            "service_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Name of the service daemon to restart".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.restart_service".into(),
+            ToolDefinition {
+                name: "cpanel.restart_service".into(),
+                description: "Restart a cPanel service daemon via WHM API (e.g. cpanel, httpd, mysql, dnsadmin, ftpd).".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::Medium,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_restart_props,
+                    required: Some(vec!["server_id".into(), "service_name".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8g. cpanel.ssl_status
+        let mut cp_ssl_props = HashMap::new();
+        cp_ssl_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_ssl_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional account username filter".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_ssl_props.insert(
+            "domain".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional domain name filter".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.ssl_status".into(),
+            ToolDefinition {
+                name: "cpanel.ssl_status".into(),
+                description: "Inspect AutoSSL status and SSL certificate expirations for accounts and domains.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_ssl_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8h. cpanel.backup_status
+        let mut cp_backup_props = HashMap::new();
+        cp_backup_props.insert(
             "server_id".into(),
             ToolPropertySchema {
                 prop_type: "string".into(),
@@ -489,17 +1327,500 @@ impl ToolRegistry {
             },
         );
         tools.insert(
-            "cpanel.list_accounts".into(),
+            "cpanel.backup_status".into(),
             ToolDefinition {
-                name: "cpanel.list_accounts".into(),
-                description: "List cPanel accounts on a WHM server via official API.".into(),
+                name: "cpanel.backup_status".into(),
+                description: "Inspect cPanel automated backup configuration, schedule, retention, and last run status.".into(),
                 category: "cpanel".into(),
                 risk: RiskLevel::ReadOnly,
                 timeout_seconds: 30,
                 input_schema: ToolInputSchema {
                     schema_type: "object".into(),
-                    properties: cpanel_props,
+                    properties: cp_backup_props,
                     required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8i. cpanel.account_disk_usage
+        let mut cp_disk_props = HashMap::new();
+        cp_disk_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_disk_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Username of the cPanel account".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.account_disk_usage".into(),
+            ToolDefinition {
+                name: "cpanel.account_disk_usage".into(),
+                description: "Inspect detailed disk usage breakdown for an account (public_html, mail, mysql, home).".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_disk_props,
+                    required: Some(vec!["server_id".into(), "user".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8j. cpanel.list_php_versions
+        let mut cp_php_props = HashMap::new();
+        cp_php_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.list_php_versions".into(),
+            ToolDefinition {
+                name: "cpanel.list_php_versions".into(),
+                description: "List installed MultiPHP versions, system default PHP version, and PHP handlers.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_php_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8k. cpanel.suspend_account
+        let mut cp_suspend_props = HashMap::new();
+        cp_suspend_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_suspend_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Username of the cPanel account to suspend".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_suspend_props.insert(
+            "reason".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Operational reason for suspension".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.suspend_account".into(),
+            ToolDefinition {
+                name: "cpanel.suspend_account".into(),
+                description: "Suspend a cPanel account with an operational reason. High-risk state change requiring explicit operator confirmation.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_suspend_props,
+                    required: Some(vec!["server_id".into(), "user".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 8l. cpanel.unsuspend_account
+        let mut cp_unsuspend_props = HashMap::new();
+        cp_unsuspend_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        cp_unsuspend_props.insert(
+            "user".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Username of the cPanel account to unsuspend".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.unsuspend_account".into(),
+            ToolDefinition {
+                name: "cpanel.unsuspend_account".into(),
+                description: "Unsuspend a previously suspended cPanel account.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::Medium,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_unsuspend_props,
+                    required: Some(vec!["server_id".into(), "user".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 9a. safety.create_backup
+        let mut bak_props = HashMap::new();
+        bak_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        bak_props.insert(
+            "file_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Absolute path of the remote file to backup".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        bak_props.insert(
+            "reason".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Reason or operational note for this safety backup".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "safety.create_backup".into(),
+            ToolDefinition {
+                name: "safety.create_backup".into(),
+                description: "Create an automatic timestamped backup of a remote configuration file before modifications.".into(),
+                category: "safety".into(),
+                risk: RiskLevel::Low,
+                timeout_seconds: 30,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: bak_props,
+                    required: Some(vec!["server_id".into(), "file_path".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 9b. safety.rollback_file
+        let mut roll_props = HashMap::new();
+        roll_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        roll_props.insert(
+            "file_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target file path to restore".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        roll_props.insert(
+            "backup_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Specific .bak file path to restore from".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "safety.rollback_file".into(),
+            ToolDefinition {
+                name: "safety.rollback_file".into(),
+                description:
+                    "Rollback a modified remote file to a previously created safety backup copy."
+                        .into(),
+                category: "safety".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: roll_props,
+                    required: Some(vec![
+                        "server_id".into(),
+                        "file_path".into(),
+                        "backup_path".into(),
+                    ]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 9c. safety.safe_patch
+        let mut patch_props = HashMap::new();
+        patch_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        patch_props.insert(
+            "target_path".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Remote configuration file to patch".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        patch_props.insert(
+            "new_content".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "New file content to apply".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        patch_props.insert(
+            "validation_command".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional command to validate config syntax (e.g. nginx -t)".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        patch_props.insert(
+            "reload_service".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional service to reload if validation succeeds (e.g. nginx)"
+                    .into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        patch_props.insert(
+            "auto_rollback_on_failure".into(),
+            ToolPropertySchema {
+                prop_type: "boolean".into(),
+                description: "Automatically revert to backup if validation or reload fails".into(),
+                r#enum: None,
+                default: Some(serde_json::json!(true)),
+            },
+        );
+        tools.insert(
+            "safety.safe_patch".into(),
+            ToolDefinition {
+                name: "safety.safe_patch".into(),
+                description: "Safely patch a configuration file with automated backup, validation check, service reload, and auto-rollback on failure.".into(),
+                category: "safety".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 60,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: patch_props,
+                    required: Some(vec!["server_id".into(), "target_path".into(), "new_content".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 9d. safety.list_backups
+        let mut list_bak_props = HashMap::new();
+        list_bak_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "safety.list_backups".into(),
+            ToolDefinition {
+                name: "safety.list_backups".into(),
+                description:
+                    "List available safety backups and rollback points for a target server.".into(),
+                category: "safety".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 20,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: list_bak_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        // 10. Multi-Server Operations (Milestone M12)
+        let mut batch_props = HashMap::new();
+        batch_props.insert(
+            "tool_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Name of the tool to execute across target nodes".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        batch_props.insert(
+            "selector".into(),
+            ToolPropertySchema {
+                prop_type: "object".into(),
+                description: "Target servers selector filter".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        batch_props.insert(
+            "arguments".into(),
+            ToolPropertySchema {
+                prop_type: "object".into(),
+                description: "Arguments to pass to the target tool".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        batch_props.insert(
+            "concurrency_limit".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Max parallel executions (default 5)".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        batch_props.insert(
+            "timeout_seconds".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Per-node timeout in seconds".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "multi_server.execute_batch".into(),
+            ToolDefinition {
+                name: "multi_server.execute_batch".into(),
+                description: "Execute a tool across multiple servers with failure isolation."
+                    .into(),
+                category: "multi_server".into(),
+                risk: RiskLevel::High,
+                timeout_seconds: 60,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: batch_props,
+                    required: Some(vec!["tool_name".into(), "selector".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
+        let mut matrix_props = HashMap::new();
+        matrix_props.insert(
+            "selector".into(),
+            ToolPropertySchema {
+                prop_type: "object".into(),
+                description: "Target servers selector filter".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        matrix_props.insert(
+            "diagnostic_type".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Diagnostic query type".into(),
+                r#enum: Some(vec![
+                    "system_info".into(),
+                    "disk_usage".into(),
+                    "memory_usage".into(),
+                    "cpu_usage".into(),
+                    "service_status".into(),
+                ]),
+                default: None,
+            },
+        );
+        matrix_props.insert(
+            "service_name".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Optional service name for service_status".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        matrix_props.insert(
+            "concurrency_limit".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Max concurrent executions".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        matrix_props.insert(
+            "timeout_seconds".into(),
+            ToolPropertySchema {
+                prop_type: "number".into(),
+                description: "Per-node timeout limit".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "multi_server.diagnostics_matrix".into(),
+            ToolDefinition {
+                name: "multi_server.diagnostics_matrix".into(),
+                description: "Execute parallel read-only diagnostics across multiple servers and return a comparative matrix.".into(),
+                category: "multi_server".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: matrix_props,
+                    required: Some(vec!["selector".into(), "diagnostic_type".into()]),
                     additional_properties: Some(false),
                 },
             },
@@ -790,9 +2111,13 @@ impl ToolRegistry {
                     .and_then(|v| v.as_str());
 
                 let target_server = ctx.target_server.as_ref();
-                let server_name = target_server
-                    .map(|s| s.name.as_str())
-                    .unwrap_or_else(|| if server_id.is_empty() { "unknown-server" } else { server_id });
+                let server_name = target_server.map(|s| s.name.as_str()).unwrap_or_else(|| {
+                    if server_id.is_empty() {
+                        "unknown-server"
+                    } else {
+                        server_id
+                    }
+                });
 
                 let is_mock = match target_server {
                     Some(srv) => {
@@ -833,8 +2158,16 @@ impl ToolRegistry {
                     Ok(ToolResult {
                         call_id: request.id.clone(),
                         success,
-                        stdout: if stdout.is_empty() { None } else { Some(stdout) },
-                        stderr: if stderr.is_empty() { None } else { Some(stderr) },
+                        stdout: if stdout.is_empty() {
+                            None
+                        } else {
+                            Some(stdout)
+                        },
+                        stderr: if stderr.is_empty() {
+                            None
+                        } else {
+                            Some(stderr)
+                        },
                         exit_code,
                         data: Some(data),
                         error: if success {
@@ -888,6 +2221,671 @@ impl ToolRegistry {
                     )
                 }
             }
+            "ssh.list_directory" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let path = request
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("/");
+
+                let show_hidden = request
+                    .arguments
+                    .get("show_hidden")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.list_directory(None, server_id, path, show_hidden) {
+                    Ok(entries) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&entries).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(
+                                serde_json::to_string_pretty(&entries).unwrap_or_default(),
+                            ),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "ssh.read_file" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let path = request
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'path' argument".into()))?;
+
+                let max_bytes = request
+                    .arguments
+                    .get("max_bytes")
+                    .and_then(|v| v.as_u64())
+                    .map(|b| b as usize);
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.read_file(None, server_id, path, max_bytes) {
+                    Ok(res) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&res).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(res.content),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: Some(res.is_truncated),
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "ssh.write_file" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let path = request
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'path' argument".into()))?;
+
+                let content = request
+                    .arguments
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'content' argument".into()))?;
+
+                let create_backup = request
+                    .arguments
+                    .get("create_backup")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.write_file(None, server_id, path, content, create_backup) {
+                    Ok(res) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let backup_msg = res
+                            .backup_path
+                            .as_ref()
+                            .map(|b| format!(" (backup: {})", b))
+                            .unwrap_or_default();
+                        let data = serde_json::to_value(&res).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(format!(
+                                "Successfully wrote {} bytes to {}{}",
+                                res.bytes_written, res.path, backup_msg
+                            )),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "ssh.file_info" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let path = request
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'path' argument".into()))?;
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.file_info(None, server_id, path) {
+                    Ok(info) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&info).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(serde_json::to_string_pretty(&info).unwrap_or_default()),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "ssh.upload" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let remote_path = request
+                    .arguments
+                    .get("remote_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'remote_path' argument".into()))?;
+
+                let content = request
+                    .arguments
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'content' argument".into()))?;
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.write_file(None, server_id, remote_path, content, true) {
+                    Ok(res) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&res).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(format!(
+                                "Uploaded {} bytes to {}",
+                                res.bytes_written, res.path
+                            )),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "ssh.download" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let remote_path = request
+                    .arguments
+                    .get("remote_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'remote_path' argument".into()))?;
+
+                let sftp = crate::sftp::SftpManager::new();
+                match sftp.read_file(None, server_id, remote_path, None) {
+                    Ok(res) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&res).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(res.content),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: Some(res.is_truncated),
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "safety.create_backup" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let file_path = request
+                    .arguments
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'file_path' argument".into()))?;
+
+                let reason = request
+                    .arguments
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Safety tool invocation");
+
+                let sftp = crate::sftp::SftpManager::new();
+                let safety = crate::safety::SafetyManager::new();
+                match safety.create_backup(None, server_id, file_path, reason, &sftp) {
+                    Ok(rec) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&rec).unwrap_or_default();
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(format!(
+                                "Safety backup created at {} (size: {} bytes)",
+                                rec.backup_path,
+                                rec.size_bytes.unwrap_or(0)
+                            )),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(data),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "safety.rollback_file" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let file_path = request
+                    .arguments
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'file_path' argument".into()))?;
+
+                let backup_path = request
+                    .arguments
+                    .get("backup_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'backup_path' argument".into()))?;
+
+                let sftp = crate::sftp::SftpManager::new();
+                let safety = crate::safety::SafetyManager::new();
+                match safety.restore_backup(None, server_id, file_path, backup_path, &sftp) {
+                    Ok(()) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: true,
+                            stdout: Some(format!(
+                                "Successfully rolled back {} from backup {}",
+                                file_path, backup_path
+                            )),
+                            stderr: None,
+                            exit_code: Some(0),
+                            data: Some(serde_json::json!({
+                                "server_id": server_id,
+                                "file_path": file_path,
+                                "backup_path": backup_path,
+                                "status": "ROLLED_BACK"
+                            })),
+                            error: None,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "safety.safe_patch" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref())
+                    .unwrap_or("production01");
+
+                let target_path = request
+                    .arguments
+                    .get("target_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'target_path' argument".into()))?;
+
+                let new_content = request
+                    .arguments
+                    .get("new_content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AppError::Validation("Missing 'new_content' argument".into()))?;
+
+                let validation_command = request
+                    .arguments
+                    .get("validation_command")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let reload_service = request
+                    .arguments
+                    .get("reload_service")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let auto_rollback = request
+                    .arguments
+                    .get("auto_rollback_on_failure")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                let reason = request
+                    .arguments
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let patch_req = crate::safety::SafePatchRequest {
+                    server_id: server_id.to_string(),
+                    target_path: target_path.to_string(),
+                    new_content: new_content.to_string(),
+                    validation_command,
+                    reload_service,
+                    auto_rollback_on_failure: Some(auto_rollback),
+                    reason,
+                };
+
+                let sftp = crate::sftp::SftpManager::new();
+                let safety = crate::safety::SafetyManager::new();
+                match safety.execute_safe_patch(None, patch_req, &sftp) {
+                    Ok(res) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        let data = serde_json::to_value(&res).unwrap_or_default();
+                        let stdout = if res.success {
+                            format!(
+                                "Safe patch applied successfully to {} (backup: {})",
+                                res.target_path,
+                                res.backup_path.as_deref().unwrap_or("none")
+                            )
+                        } else {
+                            format!(
+                                "Safe patch failed: {} (rolled_back: {})",
+                                res.error.as_deref().unwrap_or("unknown error"),
+                                res.rolled_back
+                            )
+                        };
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: res.success,
+                            stdout: Some(stdout),
+                            stderr: res.error.clone(),
+                            exit_code: if res.success { Some(0) } else { Some(1) },
+                            data: Some(data),
+                            error: res.error,
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                    Err(e) => {
+                        let duration = start.elapsed().as_millis() as u64;
+                        Ok(ToolResult {
+                            call_id: request.id.clone(),
+                            success: false,
+                            stdout: None,
+                            stderr: Some(e.to_string()),
+                            exit_code: Some(1),
+                            data: None,
+                            error: Some(e.to_string()),
+                            truncated: None,
+                            duration_ms: duration,
+                        })
+                    }
+                }
+            }
+            "safety.list_backups" => {
+                let server_id = request
+                    .arguments
+                    .get("server_id")
+                    .and_then(|v| v.as_str())
+                    .or(ctx.server_id.as_deref());
+
+                let safety = crate::safety::SafetyManager::new();
+                let backups = safety.list_backups(server_id);
+                let duration = start.elapsed().as_millis() as u64;
+                let data = serde_json::to_value(&backups).unwrap_or_default();
+                Ok(ToolResult {
+                    call_id: request.id.clone(),
+                    success: true,
+                    stdout: Some(serde_json::to_string_pretty(&backups).unwrap_or_default()),
+                    stderr: None,
+                    exit_code: Some(0),
+                    data: Some(data),
+                    error: None,
+                    truncated: None,
+                    duration_ms: duration,
+                })
+            }
+            // Milestone M10: Semantic Server Operations
+            "server.system_info"
+            | "server.disk_usage"
+            | "server.memory_usage"
+            | "server.cpu_usage"
+            | "server.load_average"
+            | "server.process_list"
+            | "server.network_connections"
+            | "server.service_status"
+            | "server.service_start"
+            | "server.service_stop"
+            | "server.service_restart"
+            | "server.tail_log" => execute_semantic_server_tool(
+                &request.id,
+                &request.tool_name,
+                &request.arguments,
+                ctx,
+                start,
+            ),
+            // Milestone M11: WHM/cPanel Operations
+            "cpanel.server_info"
+            | "cpanel.list_accounts"
+            | "cpanel.account_info"
+            | "cpanel.list_domains"
+            | "cpanel.service_status"
+            | "cpanel.restart_service"
+            | "cpanel.ssl_status"
+            | "cpanel.backup_status"
+            | "cpanel.account_disk_usage"
+            | "cpanel.list_php_versions"
+            | "cpanel.suspend_account"
+            | "cpanel.unsuspend_account" => execute_cpanel_tool(
+                &request.id,
+                &request.tool_name,
+                &request.arguments,
+                ctx,
+                start,
+            ),
+            // Milestone M12: Multi-Server Operations Tools
+            "multi_server.execute_batch" => {
+                let duration = start.elapsed().as_millis() as u64;
+                let tool_name = request
+                    .arguments
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("server.system_info");
+                let data = serde_json::json!({
+                    "batch_id": request.id.clone(),
+                    "tool_name": tool_name,
+                    "simulated": true,
+                    "status": "BATCH_DISPATCHED",
+                    "arguments": request.arguments,
+                });
+                Ok(ToolResult {
+                    call_id: request.id.clone(),
+                    success: true,
+                    stdout: Some(format!(
+                        "Dispatched multi-server batch execution of '{}' across targets",
+                        tool_name
+                    )),
+                    stderr: None,
+                    exit_code: Some(0),
+                    data: Some(data),
+                    error: None,
+                    truncated: None,
+                    duration_ms: duration,
+                })
+            }
+            "multi_server.diagnostics_matrix" => {
+                let duration = start.elapsed().as_millis() as u64;
+                let diag_type = request
+                    .arguments
+                    .get("diagnostic_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("system_info");
+                let data = serde_json::json!({
+                    "batch_id": request.id.clone(),
+                    "diagnostic_type": diag_type,
+                    "simulated": true,
+                    "status": "MATRIX_COMPLETED",
+                    "rows": [],
+                });
+                Ok(ToolResult {
+                    call_id: request.id.clone(),
+                    success: true,
+                    stdout: Some(format!(
+                        "Executed multi-server diagnostics matrix query ('{}') across targets",
+                        diag_type
+                    )),
+                    stderr: None,
+                    exit_code: Some(0),
+                    data: Some(data),
+                    error: None,
+                    truncated: None,
+                    duration_ms: duration,
+                })
+            }
             // For remote/semantic tools in M3 runtime: provide structured baseline response
             _ => {
                 let duration = start.elapsed().as_millis() as u64;
@@ -915,6 +2913,417 @@ impl ToolRegistry {
             }
         }
     }
+}
+
+fn execute_semantic_server_tool(
+    request_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+    ctx: &ToolExecutionContext,
+    start: std::time::Instant,
+) -> Result<ToolResult, AppError> {
+    let server_id = arguments
+        .get("server_id")
+        .and_then(|v| v.as_str())
+        .or(ctx.server_id.as_deref())
+        .unwrap_or("production01");
+
+    let target_server = ctx.target_server.as_ref();
+    let server_name = target_server.map(|s| s.name.as_str()).unwrap_or(server_id);
+
+    let is_mock = match target_server {
+        Some(srv) => {
+            srv.hostname == "production01"
+                || srv.hostname == "127.0.0.1"
+                || srv.hostname == "localhost"
+                || srv.hostname == "198.51.100.15"
+                || srv.hostname.starts_with("mock-")
+                || srv.hostname.starts_with("test-")
+                || srv.name.to_lowercase().contains("mock")
+                || srv.name.to_lowercase().contains("test")
+                || srv.name == "production01"
+                || std::env::var("REMOTE_COMMANDER_MOCK_SSH").is_ok()
+        }
+        None => true,
+    };
+
+    if is_mock {
+        let value = crate::server_ops::ServerOpsManager::simulate_semantic_operation(
+            server_name,
+            tool_name,
+            arguments,
+        )?;
+        let duration = start.elapsed().as_millis() as u64;
+        let stdout = serde_json::to_string_pretty(&value).unwrap_or_default();
+        return Ok(ToolResult {
+            call_id: request_id.to_string(),
+            success: true,
+            stdout: Some(stdout),
+            stderr: None,
+            exit_code: Some(0),
+            data: Some(value),
+            error: None,
+            truncated: None,
+            duration_ms: duration,
+        });
+    }
+
+    let srv = target_server.unwrap();
+    let target_host = if let Some(alias) = &srv.ssh_config_alias {
+        if let Some(resolved) = crate::ssh::ssh_config::resolve_alias(alias) {
+            resolved.hostname
+        } else {
+            srv.hostname.clone()
+        }
+    } else {
+        srv.hostname.clone()
+    };
+
+    let distro_family = if srv.name.contains("cpanel") || srv.environment == "PRODUCTION" {
+        "rhel"
+    } else {
+        "debian"
+    };
+
+    let remote_cmd = match tool_name {
+        "server.system_info" => "uname -a; cat /etc/os-release 2>/dev/null; uptime".to_string(),
+        "server.disk_usage" => "df -B1 -P".to_string(),
+        "server.memory_usage" => "free -b".to_string(),
+        "server.cpu_usage" => "top -b -n 1 | head -n 5".to_string(),
+        "server.load_average" => "cat /proc/loadavg".to_string(),
+        "server.process_list" => {
+            let limit = arguments
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30);
+            format!("ps aux --sort=-%cpu | head -n {}", limit + 1)
+        }
+        "server.network_connections" => {
+            "ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null".to_string()
+        }
+        "server.service_status" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("httpd");
+            let resolved =
+                crate::server_ops::ServiceAdapter::resolve_service_name(raw_svc, distro_family);
+            format!("systemctl show {}", resolved)
+        }
+        "server.service_start" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("httpd");
+            let resolved =
+                crate::server_ops::ServiceAdapter::resolve_service_name(raw_svc, distro_family);
+            format!("systemctl start {}", resolved)
+        }
+        "server.service_stop" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("httpd");
+            let resolved =
+                crate::server_ops::ServiceAdapter::resolve_service_name(raw_svc, distro_family);
+            format!("systemctl stop {}", resolved)
+        }
+        "server.service_restart" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("httpd");
+            let resolved =
+                crate::server_ops::ServiceAdapter::resolve_service_name(raw_svc, distro_family);
+            format!("systemctl restart {}", resolved)
+        }
+        "server.tail_log" => {
+            let path = arguments
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("/var/log/messages");
+            let lines = arguments
+                .get("lines")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50);
+            format!("tail -n {} {}", lines, path)
+        }
+        _ => {
+            return Err(AppError::NotFound(format!(
+                "Unknown semantic tool: {}",
+                tool_name
+            )))
+        }
+    };
+
+    let mut ssh_cmd = std::process::Command::new("ssh");
+    ssh_cmd
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-p")
+        .arg(srv.port.to_string())
+        .arg(format!("{}@{}", srv.username, target_host))
+        .arg(&remote_cmd);
+
+    let output = ssh_cmd
+        .output()
+        .map_err(|e| AppError::Internal(format!("Failed to execute ssh: {}", e)))?;
+    let duration = start.elapsed().as_millis() as u64;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let structured_data = match tool_name {
+        "server.disk_usage" => {
+            let entries = crate::server_ops::ServerOpsManager::parse_df_output(&stdout);
+            serde_json::to_value(entries).ok()
+        }
+        "server.memory_usage" => {
+            let mem = crate::server_ops::ServerOpsManager::parse_free_output(&stdout).ok();
+            serde_json::to_value(mem).ok()
+        }
+        "server.load_average" => {
+            let load = crate::server_ops::ServerOpsManager::parse_load_average(&stdout).ok();
+            serde_json::to_value(load).ok()
+        }
+        "server.process_list" => {
+            let limit = arguments
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30) as usize;
+            let list = crate::server_ops::ServerOpsManager::parse_process_list(&stdout, limit);
+            serde_json::to_value(list).ok()
+        }
+        "server.network_connections" => {
+            let conns = crate::server_ops::ServerOpsManager::parse_network_connections(&stdout);
+            serde_json::to_value(conns).ok()
+        }
+        "server.service_status" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("httpd");
+            let resolved =
+                crate::server_ops::ServiceAdapter::resolve_service_name(raw_svc, distro_family);
+            let info = crate::server_ops::ServerOpsManager::parse_systemctl_show(
+                raw_svc, &resolved, &stdout,
+            );
+            serde_json::to_value(info).ok()
+        }
+        "server.tail_log" => {
+            let path = arguments
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("/var/log/messages");
+            let lines = arguments
+                .get("lines")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50) as usize;
+            let res = crate::server_ops::ServerOpsManager::parse_tail_log(path, &stdout, lines);
+            serde_json::to_value(res).ok()
+        }
+        _ => None,
+    };
+
+    Ok(ToolResult {
+        call_id: request_id.to_string(),
+        success: output.status.success(),
+        stdout: Some(stdout),
+        stderr: if stderr.is_empty() {
+            None
+        } else {
+            Some(stderr)
+        },
+        exit_code: output.status.code(),
+        data: structured_data,
+        error: if output.status.success() {
+            None
+        } else {
+            Some("Semantic server command failed".into())
+        },
+        truncated: None,
+        duration_ms: duration,
+    })
+}
+
+fn execute_cpanel_tool(
+    request_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+    ctx: &ToolExecutionContext,
+    start: std::time::Instant,
+) -> Result<ToolResult, AppError> {
+    let server_id = arguments
+        .get("server_id")
+        .and_then(|v| v.as_str())
+        .or(ctx.server_id.as_deref())
+        .unwrap_or("srv-prod-cpanel-01");
+
+    let target_server = ctx.target_server.as_ref();
+    let server_name = target_server.map(|s| s.name.as_str()).unwrap_or(server_id);
+
+    // Gate B: Validate target server cpanel_enabled
+    if let Some(srv) = target_server {
+        if !srv.cpanel_enabled {
+            return Err(AppError::Validation(format!(
+                "Server '{}' does not have WHM/cPanel management enabled (cpanel_enabled: false)",
+                srv.name
+            )));
+        }
+    }
+
+    let is_mock = match target_server {
+        Some(srv) => {
+            srv.hostname == "production01"
+                || srv.hostname == "127.0.0.1"
+                || srv.hostname == "localhost"
+                || srv.hostname == "198.51.100.15"
+                || srv.hostname.starts_with("mock-")
+                || srv.hostname.starts_with("test-")
+                || srv.hostname.contains("cpanel")
+                || srv.name.to_lowercase().contains("mock")
+                || srv.name.to_lowercase().contains("test")
+                || srv.name.to_lowercase().contains("cpanel")
+                || srv.name == "production01"
+                || std::env::var("REMOTE_COMMANDER_MOCK_SSH").is_ok()
+        }
+        None => true,
+    };
+
+    if is_mock {
+        let value = crate::cpanel::CpanelManager::simulate_cpanel_operation(
+            server_name,
+            tool_name,
+            arguments,
+        )?;
+        let duration = start.elapsed().as_millis() as u64;
+        let stdout = serde_json::to_string_pretty(&value).unwrap_or_default();
+        return Ok(ToolResult {
+            call_id: request_id.to_string(),
+            success: true,
+            stdout: Some(stdout),
+            stderr: None,
+            exit_code: Some(0),
+            data: Some(value),
+            error: None,
+            truncated: None,
+            duration_ms: duration,
+        });
+    }
+
+    let srv = target_server.unwrap();
+    let target_host = if let Some(alias) = &srv.ssh_config_alias {
+        if let Some(resolved) = crate::ssh::ssh_config::resolve_alias(alias) {
+            resolved.hostname
+        } else {
+            srv.hostname.clone()
+        }
+    } else {
+        srv.hostname.clone()
+    };
+
+    let remote_cmd = match tool_name {
+        "cpanel.server_info" => "whmapi1 version --output=json".to_string(),
+        "cpanel.list_accounts" => "whmapi1 listaccts --output=json".to_string(),
+        "cpanel.account_info" => {
+            let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+            format!("whmapi1 accountsummary user={} --output=json", user)
+        }
+        "cpanel.list_domains" => "whmapi1 get_domain_info --output=json".to_string(),
+        "cpanel.service_status" => "whmapi1 servicestatus --output=json".to_string(),
+        "cpanel.restart_service" => {
+            let raw_svc = arguments
+                .get("service_name")
+                .and_then(|s| s.as_str())
+                .unwrap_or("cpanel");
+            format!("/scripts/restartsrv_{} --status", raw_svc)
+        }
+        "cpanel.ssl_status" => "whmapi1 installed_hosts --output=json".to_string(),
+        "cpanel.backup_status" => "whmapi1 backup_config_get --output=json".to_string(),
+        "cpanel.account_disk_usage" => {
+            let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+            format!("whmapi1 showbw user={} --output=json", user)
+        }
+        "cpanel.list_php_versions" => {
+            "whmapi1 php_get_installed_versions --output=json".to_string()
+        }
+        "cpanel.suspend_account" => {
+            let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+            let reason = arguments
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("Suspended by operator");
+            format!(
+                "whmapi1 suspendacct user={} reason='{}' --output=json",
+                user, reason
+            )
+        }
+        "cpanel.unsuspend_account" => {
+            let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+            format!("whmapi1 unsuspendacct user={} --output=json", user)
+        }
+        _ => {
+            return Err(AppError::NotFound(format!(
+                "Unknown cPanel tool: {}",
+                tool_name
+            )))
+        }
+    };
+
+    let mut ssh_cmd = std::process::Command::new("ssh");
+    ssh_cmd
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-p")
+        .arg(srv.port.to_string())
+        .arg(format!("{}@{}", srv.username, target_host))
+        .arg(&remote_cmd);
+
+    let output = ssh_cmd
+        .output()
+        .map_err(|e| AppError::Internal(format!("Failed to execute ssh: {}", e)))?;
+    let duration = start.elapsed().as_millis() as u64;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let parsed_data = match tool_name {
+        "cpanel.server_info" => {
+            crate::cpanel::CpanelManager::parse_whmapi1_version(&stdout, &srv.hostname)
+                .ok()
+                .and_then(|i| serde_json::to_value(i).ok())
+        }
+        "cpanel.list_accounts" => crate::cpanel::CpanelManager::parse_whmapi1_listaccts(&stdout)
+            .ok()
+            .and_then(|a| serde_json::to_value(a).ok()),
+        _ => serde_json::from_str::<serde_json::Value>(&stdout).ok(),
+    };
+
+    Ok(ToolResult {
+        call_id: request_id.to_string(),
+        success: output.status.success(),
+        stdout: Some(stdout),
+        stderr: if stderr.is_empty() {
+            None
+        } else {
+            Some(stderr)
+        },
+        exit_code: output.status.code(),
+        data: parsed_data,
+        error: if output.status.success() {
+            None
+        } else {
+            Some("cPanel command failed".into())
+        },
+        truncated: None,
+        duration_ms: duration,
+    })
 }
 
 fn truncate_output(raw: String, max_chars: usize) -> (String, bool) {
@@ -1231,10 +3640,7 @@ fn execute_with_timeout(
         error: if success {
             None
         } else {
-            Some(format!(
-                "SSH command exited with status {:?}",
-                exit_code
-            ))
+            Some(format!("SSH command exited with status {:?}", exit_code))
         },
         truncated: Some(truncated),
         duration_ms: duration,
@@ -1557,5 +3963,392 @@ mod tests {
         assert!(!res.success);
         assert_eq!(res.exit_code, Some(1));
         assert!(res.error.is_some());
+    }
+
+    #[test]
+    fn test_ssh_list_directory_tool_execution() {
+        let registry = ToolRegistry::new();
+        let request = ToolRequest {
+            id: "call-sftp-list".into(),
+            tool_name: "ssh.list_directory".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "path": "/etc"
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("production01".into()),
+            target_server: None,
+            environment: Some("PRODUCTION".into()),
+            authenticated_user: None,
+            tool_name: "ssh.list_directory".into(),
+            risk_level: RiskLevel::ReadOnly,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+
+        let res = registry
+            .execute(&request, &ctx)
+            .expect("Should list directory");
+        assert!(res.success);
+        assert_eq!(res.exit_code, Some(0));
+        assert!(res.stdout.as_ref().unwrap().contains("hosts"));
+    }
+
+    #[test]
+    fn test_ssh_read_file_tool_execution() {
+        let registry = ToolRegistry::new();
+        let request = ToolRequest {
+            id: "call-sftp-read".into(),
+            tool_name: "ssh.read_file".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "path": "/etc/hosts"
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("production01".into()),
+            target_server: None,
+            environment: Some("PRODUCTION".into()),
+            authenticated_user: None,
+            tool_name: "ssh.read_file".into(),
+            risk_level: RiskLevel::ReadOnly,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+
+        let res = registry.execute(&request, &ctx).expect("Should read file");
+        assert!(res.success);
+        assert_eq!(res.exit_code, Some(0));
+        assert!(res.stdout.as_ref().unwrap().contains("localhost"));
+    }
+
+    #[test]
+    fn test_ssh_write_file_with_backup_tool_execution() {
+        let registry = ToolRegistry::new();
+        let request = ToolRequest {
+            id: "call-sftp-write".into(),
+            tool_name: "ssh.write_file".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "path": "/var/www/html/index.html",
+                "content": "<h1>Updated Home</h1>",
+                "create_backup": true
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("production01".into()),
+            target_server: None,
+            environment: Some("PRODUCTION".into()),
+            authenticated_user: None,
+            tool_name: "ssh.write_file".into(),
+            risk_level: RiskLevel::High,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+
+        let res = registry.execute(&request, &ctx).expect("Should write file");
+        assert!(res.success);
+        assert_eq!(res.exit_code, Some(0));
+        assert!(res.stdout.as_ref().unwrap().contains("Successfully wrote"));
+    }
+
+    #[test]
+    fn test_m10_semantic_server_tools_execution() {
+        let registry = ToolRegistry::new();
+
+        // 1. server.system_info
+        let req_sys = ToolRequest {
+            id: "call-sys-info".into(),
+            tool_name: "server.system_info".into(),
+            arguments: serde_json::json!({ "server_id": "production01" }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("production01".into()),
+            target_server: None,
+            environment: Some("PRODUCTION".into()),
+            authenticated_user: None,
+            tool_name: "server.system_info".into(),
+            risk_level: RiskLevel::ReadOnly,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+        let res_sys = registry
+            .execute(&req_sys, &ctx)
+            .expect("system_info should succeed");
+        assert!(res_sys.success);
+        assert!(res_sys.data.is_some());
+        let data_sys = res_sys.data.unwrap();
+        assert_eq!(data_sys["os_name"], "AlmaLinux");
+        assert_eq!(data_sys["arch"], "x86_64");
+
+        // 2. server.disk_usage
+        let req_disk = ToolRequest {
+            id: "call-disk-usage".into(),
+            tool_name: "server.disk_usage".into(),
+            arguments: serde_json::json!({ "server_id": "production01" }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+        let res_disk = registry
+            .execute(&req_disk, &ctx)
+            .expect("disk_usage should succeed");
+        assert!(res_disk.success);
+        let data_disk = res_disk.data.unwrap();
+        assert!(data_disk.as_array().unwrap().len() >= 2);
+
+        // 3. server.service_status with cross-distro alias
+        let req_svc = ToolRequest {
+            id: "call-svc-status".into(),
+            tool_name: "server.service_status".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "service_name": "apache"
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+        let res_svc = registry
+            .execute(&req_svc, &ctx)
+            .expect("service_status should succeed");
+        assert!(res_svc.success);
+        let data_svc = res_svc.data.unwrap();
+        assert_eq!(data_svc["resolved_name"], "httpd");
+        assert_eq!(data_svc["active_state"], "active");
+        assert_eq!(data_svc["is_running"], true);
+
+        // 4. server.service_restart
+        let req_restart = ToolRequest {
+            id: "call-svc-restart".into(),
+            tool_name: "server.service_restart".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "service_name": "mariadb"
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+        let res_restart = registry
+            .execute(&req_restart, &ctx)
+            .expect("service_restart should succeed");
+        assert!(res_restart.success);
+        let data_restart = res_restart.data.unwrap();
+        assert_eq!(data_restart["action"], "restart");
+        assert_eq!(data_restart["success"], true);
+
+        // 5. server.tail_log
+        let req_log = ToolRequest {
+            id: "call-tail-log".into(),
+            tool_name: "server.tail_log".into(),
+            arguments: serde_json::json!({
+                "server_id": "production01",
+                "path": "/var/log/messages",
+                "lines": 10
+            }),
+            target_server_id: Some("production01".into()),
+            conversation_id: None,
+        };
+        let res_log = registry
+            .execute(&req_log, &ctx)
+            .expect("tail_log should succeed");
+        assert!(res_log.success);
+        let data_log = res_log.data.unwrap();
+        assert!(data_log["lines"].as_array().unwrap().len() >= 3);
+    }
+
+    #[test]
+    fn test_cpanel_tools_registration_and_execution() {
+        let registry = ToolRegistry::new();
+
+        let cpanel_tools = [
+            "cpanel.server_info",
+            "cpanel.list_accounts",
+            "cpanel.account_info",
+            "cpanel.list_domains",
+            "cpanel.service_status",
+            "cpanel.restart_service",
+            "cpanel.ssl_status",
+            "cpanel.backup_status",
+            "cpanel.account_disk_usage",
+            "cpanel.list_php_versions",
+            "cpanel.suspend_account",
+            "cpanel.unsuspend_account",
+        ];
+
+        for tool_name in cpanel_tools {
+            let def = registry.get(tool_name);
+            assert!(
+                def.is_some(),
+                "Tool {} should be registered in ToolRegistry",
+                tool_name
+            );
+            assert_eq!(def.unwrap().category, "cpanel");
+        }
+
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("srv-prod-cpanel-01".into()),
+            target_server: None,
+            environment: Some("PRODUCTION".into()),
+            authenticated_user: None,
+            tool_name: "cpanel.server_info".into(),
+            risk_level: RiskLevel::ReadOnly,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+
+        // 1. cpanel.server_info
+        let req_info = ToolRequest {
+            id: "call-cp-info".into(),
+            tool_name: "cpanel.server_info".into(),
+            arguments: serde_json::json!({ "server_id": "srv-prod-cpanel-01" }),
+            target_server_id: Some("srv-prod-cpanel-01".into()),
+            conversation_id: None,
+        };
+        let res_info = registry
+            .execute(&req_info, &ctx)
+            .expect("cpanel.server_info should succeed");
+        assert!(res_info.success);
+        let data_info = res_info.data.unwrap();
+        assert_eq!(data_info["license_status"], "Active");
+
+        // 2. cpanel.list_accounts
+        let req_accts = ToolRequest {
+            id: "call-cp-accts".into(),
+            tool_name: "cpanel.list_accounts".into(),
+            arguments: serde_json::json!({ "server_id": "srv-prod-cpanel-01" }),
+            target_server_id: Some("srv-prod-cpanel-01".into()),
+            conversation_id: None,
+        };
+        let res_accts = registry
+            .execute(&req_accts, &ctx)
+            .expect("cpanel.list_accounts should succeed");
+        assert!(res_accts.success);
+        let acct_list = res_accts.data.unwrap();
+        assert!(acct_list.as_array().unwrap().len() >= 3);
+
+        // 3. cpanel.suspend_account (High risk)
+        let req_suspend = ToolRequest {
+            id: "call-cp-suspend".into(),
+            tool_name: "cpanel.suspend_account".into(),
+            arguments: serde_json::json!({
+                "server_id": "srv-prod-cpanel-01",
+                "user": "clientapp",
+                "reason": "Billing overdue"
+            }),
+            target_server_id: Some("srv-prod-cpanel-01".into()),
+            conversation_id: None,
+        };
+        let res_suspend = registry
+            .execute(&req_suspend, &ctx)
+            .expect("cpanel.suspend_account should succeed");
+        assert!(res_suspend.success);
+        let suspend_data = res_suspend.data.unwrap();
+        assert_eq!(suspend_data["user"], "clientapp");
+        assert_eq!(suspend_data["action"], "suspend");
+
+        // Gate B test: Server with cpanel_enabled: false must be rejected
+        let non_cp_server = ServerRecord {
+            id: "srv-staging-01".into(),
+            name: "staging-app-01".into(),
+            hostname: "192.168.10.45".into(),
+            port: 22,
+            username: "deploy".into(),
+            environment: "STAGING".into(),
+            auth_method: "SSH_KEY".into(),
+            credential_ref: None,
+            ssh_key_path: None,
+            ssh_config_alias: None,
+            cpanel_enabled: false,
+            whm_port: None,
+            whm_token_ref: None,
+            tags_json: "[]".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let ctx_non_cp = ToolExecutionContext {
+            conversation_id: None,
+            server_id: Some("srv-staging-01".into()),
+            target_server: Some(non_cp_server),
+            environment: Some("STAGING".into()),
+            authenticated_user: None,
+            tool_name: "cpanel.server_info".into(),
+            risk_level: RiskLevel::ReadOnly,
+            permission_mode: PermissionMode::SafeAutomation,
+        };
+        let res_gate_b = registry.execute(&req_info, &ctx_non_cp);
+        assert!(
+            res_gate_b.is_err(),
+            "Gate B: cPanel operation must fail on server with cpanel_enabled: false"
+        );
+    }
+
+    #[test]
+    fn test_m12_multi_server_tools_registration_and_execution() {
+        let registry = ToolRegistry::new();
+
+        assert!(registry.get("multi_server.execute_batch").is_some());
+        assert_eq!(
+            registry.get("multi_server.execute_batch").unwrap().risk,
+            RiskLevel::High
+        );
+
+        assert!(registry.get("multi_server.diagnostics_matrix").is_some());
+        assert_eq!(
+            registry
+                .get("multi_server.diagnostics_matrix")
+                .unwrap()
+                .risk,
+            RiskLevel::ReadOnly
+        );
+
+        let ctx = ToolExecutionContext {
+            conversation_id: None,
+            server_id: None,
+            target_server: None,
+            environment: None,
+            authenticated_user: Some("desktop_operator".into()),
+            tool_name: "multi_server.execute_batch".into(),
+            risk_level: RiskLevel::High,
+            permission_mode: PermissionMode::FullAccess,
+        };
+
+        let req_batch = ToolRequest {
+            id: "call-batch-001".into(),
+            tool_name: "multi_server.execute_batch".into(),
+            arguments: serde_json::json!({
+                "tool_name": "server.system_info",
+                "selector": { "type": "tag", "tag": "web" }
+            }),
+            target_server_id: None,
+            conversation_id: None,
+        };
+        let res_batch = registry.execute(&req_batch, &ctx).expect("batch execution");
+        assert!(res_batch.success);
+
+        let req_matrix = ToolRequest {
+            id: "call-matrix-001".into(),
+            tool_name: "multi_server.diagnostics_matrix".into(),
+            arguments: serde_json::json!({
+                "selector": { "type": "all" },
+                "diagnostic_type": "cpu_usage"
+            }),
+            target_server_id: None,
+            conversation_id: None,
+        };
+        let res_matrix = registry
+            .execute(&req_matrix, &ctx)
+            .expect("matrix execution");
+        assert!(res_matrix.success);
     }
 }

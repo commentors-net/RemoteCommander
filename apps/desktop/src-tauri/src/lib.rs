@@ -1,23 +1,28 @@
 //! RemoteCommander Desktop Core
 //! Foundation, local persistence, and security runtime for AI Operations Assistant.
 
+pub mod alpha;
 pub mod approval;
 pub mod commands;
+pub mod cpanel;
 pub mod database;
 pub mod error;
 pub mod logging;
 pub mod models;
+pub mod multi_server;
 pub mod policy;
+pub mod safety;
 pub mod secret;
+pub mod server_ops;
+pub mod sftp;
 pub mod ssh;
+pub mod terminal;
 pub mod tools;
+pub mod updater;
 
-use approval::ApprovalManager;
 use database::Database;
-use secret::SecretService;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tools::ToolRegistry;
 
 pub mod app_info {
     pub const APP_NAME: &str = "RemoteCommander";
@@ -74,19 +79,31 @@ pub fn init_database(db_path: Option<PathBuf>) -> Result<Database, error::AppErr
 }
 
 /// Run Tauri Desktop Application
+#[cfg(not(test))]
 pub fn run() {
+    use approval::ApprovalManager;
+    use secret::SecretService;
+    use terminal::TerminalManager;
+    use tools::ToolRegistry;
+
     logging::init_logging();
 
     let db = Database::in_memory().expect("Failed to initialize database");
     let secret_service = SecretService::with_os_keyring();
     let tool_registry = ToolRegistry::new();
     let approval_manager = ApprovalManager::new();
+    let terminal_manager = TerminalManager::new();
+    let sftp_manager = sftp::SftpManager::new();
+    let safety_manager = safety::SafetyManager::new();
 
     tauri::Builder::default()
         .manage(db)
         .manage(secret_service)
         .manage(tool_registry)
         .manage(approval_manager)
+        .manage(terminal_manager)
+        .manage(sftp_manager)
+        .manage(safety_manager)
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::get_setting,
@@ -97,9 +114,15 @@ pub fn run() {
             commands::delete_server,
             commands::list_audit_events,
             commands::record_audit_event,
+            commands::prune_audit_events,
+            commands::check_for_updates,
+            commands::verify_release_integrity,
+            commands::get_sbom_metadata,
+            commands::install_update,
             commands::save_secret,
             commands::list_credential_refs,
             commands::delete_secret,
+            commands::get_secret,
             commands::list_tool_definitions,
             commands::evaluate_and_execute_tool,
             commands::submit_approval,
@@ -109,6 +132,55 @@ pub fn run() {
             commands::accept_server_host_key,
             commands::list_discovered_ssh_config_hosts,
             commands::list_known_hosts,
+            commands::start_terminal_session,
+            commands::send_terminal_input,
+            commands::read_terminal_output,
+            commands::resize_terminal,
+            commands::interrupt_terminal,
+            commands::terminate_terminal_session,
+            commands::list_terminal_sessions,
+            commands::sftp_list_directory,
+            commands::sftp_read_file,
+            commands::sftp_write_file,
+            commands::sftp_file_info,
+            commands::sftp_delete_file,
+            commands::sftp_create_directory,
+            commands::safety_create_backup,
+            commands::safety_restore_backup,
+            commands::safety_list_backups,
+            commands::safety_execute_safe_patch,
+            commands::safety_set_full_access_expiry,
+            commands::safety_get_full_access_status,
+            commands::server_system_info,
+            commands::server_disk_usage,
+            commands::server_memory_usage,
+            commands::server_cpu_usage,
+            commands::server_load_average,
+            commands::server_process_list,
+            commands::server_network_connections,
+            commands::server_service_status,
+            commands::server_service_action,
+            commands::server_tail_log,
+            commands::cpanel_server_info,
+            commands::cpanel_list_accounts,
+            commands::cpanel_account_info,
+            commands::cpanel_list_domains,
+            commands::cpanel_service_status,
+            commands::cpanel_restart_service,
+            commands::cpanel_ssl_status,
+            commands::cpanel_backup_status,
+            commands::cpanel_account_disk_usage,
+            commands::cpanel_list_php_versions,
+            commands::cpanel_suspend_account,
+            commands::cpanel_unsuspend_account,
+            commands::multi_server_resolve_targets,
+            commands::multi_server_evaluate_policy,
+            commands::multi_server_execute_batch,
+            commands::multi_server_diagnostics_matrix,
+            commands::export_audit_log,
+            commands::get_alpha_readiness_report,
+            commands::check_database_integrity,
+            commands::vacuum_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RemoteCommander desktop application");
