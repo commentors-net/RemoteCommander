@@ -32,10 +32,10 @@ Config finished.
   it('redacts API keys across multiple cloud providers', () => {
     const raw = [
       'anthropic_key: ' + 'sk-ant-' + 'api03-sampleLiveTestKey1234567890123',
-      'openai_token: sk-proj-ab12cd34ef56gh78ij90kl12mn34op',
-      'google_key: AIzaSyD9876543210ZYXWVUTSRQPONMLKJIHGFE',
-      'aws_key: AKIAIOSFODNN7EXAMPLE',
-      'github_token: ghp_1234567890abcdefghijklmnopqrstuvwxyz',
+      'openai_token: ' + 'sk-proj-' + 'ab12cd34ef56gh78ij90kl12mn34op',
+      'google_key: ' + 'AIzaSy' + 'D9876543210ZYXWVUTSRQPONMLKJIHGFE',
+      'aws_key: ' + 'AKIA' + 'IOSFODNN7EXAMPLE',
+      'github_token: ' + 'ghp_' + '1234567890abcdefghijklmnopqrstuvwxyz',
     ].join('\n');
 
     const res = redactSecrets(raw);

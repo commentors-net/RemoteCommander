@@ -24,6 +24,9 @@ const SECRET_REGEXES = [
   { name: 'Private Key Header', regex: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/ },
   { name: 'OpenAI API Key', regex: /\bsk-[a-zA-Z0-9]{20,T3BlbkFJ[a-zA-Z0-9]{20,}\b/ },
   { name: 'Anthropic API Key', regex: /\bsk-ant-[-a-zA-Z0-9_]{20,}\b/ },
+  { name: 'Google API Key', regex: /\bAIzaSy[A-Za-z0-9_-]{33}\b/ },
+  { name: 'AWS Access Key', regex: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: 'GitHub Token', regex: /\bghp_[a-zA-Z0-9]{36}\b/ },
   { name: 'Generic API Secret Assignment', regex: /(?:api_key|apiKey|secret_key|secretKey|password|passphrase)\s*[:=]\s*['"][-a-zA-Z0-9_]{16,}['"]/i },
   { name: 'WHM API Token Assignment', regex: /\bwhm_token\s*[:=]\s*['"][-a-zA-Z0-9_]{20,}['"]/i },
 ];

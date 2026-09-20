@@ -101,8 +101,8 @@ mod tests {
         let cleaned = redact_sensitive_string(&sensitive);
         assert_eq!(cleaned, "[REDACTED_PRIVATE_KEY]");
 
-        let dummy_token = "sk-proj-abc123xyz7890123456789";
-        let cleaned_key = redact_sensitive_string(dummy_token);
+        let dummy_token = format!("{}{}", "sk-proj-", "abc123xyz7890123456789");
+        let cleaned_key = redact_sensitive_string(&dummy_token);
         assert_eq!(cleaned_key, "[REDACTED_API_KEY]");
 
         let anthropic_key = format!("{}{}", "sk-ant-", "api03-sample1234567890");
