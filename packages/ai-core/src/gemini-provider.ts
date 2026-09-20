@@ -11,6 +11,8 @@ import {
   ModelInfo,
   UsageInfo,
   parseHTTPError,
+  sanitizeToolName,
+  desanitizeToolName,
 } from './provider.js';
 
 export interface GeminiProviderOptions {
@@ -81,7 +83,7 @@ export class GeminiProvider implements AIProvider {
     const args = obj.functionCall?.args ?? obj.args ?? {};
     return {
       id: obj.id ?? `call-gem-${Date.now()}`,
-      toolName: name,
+      toolName: desanitizeToolName(name),
       argumentsJson: typeof args === 'string' ? args : JSON.stringify(args),
     };
   }
@@ -139,7 +141,7 @@ export class GeminiProvider implements AIProvider {
           parts: [
             {
               functionResponse: {
-                name: msg.toolCallId ?? 'unknown_tool',
+                name: sanitizeToolName(msg.toolName ?? msg.toolCallId ?? 'unknown_tool'),
                 response: { output: msg.content },
               },
             },
@@ -160,7 +162,7 @@ export class GeminiProvider implements AIProvider {
             }
             parts.push({
               functionCall: {
-                name: tc.toolName,
+                name: sanitizeToolName(tc.toolName),
                 args: parsedArgs,
               },
             });
@@ -199,7 +201,7 @@ export class GeminiProvider implements AIProvider {
       bodyPayload.tools = [
         {
           functionDeclarations: request.tools.map((t) => ({
-            name: t.name,
+            name: sanitizeToolName(t.name),
             description: t.description,
             parameters: t.inputSchema,
           })),
@@ -282,7 +284,9 @@ export class GeminiProvider implements AIProvider {
                   yield {
                     type: 'TOOL_CALL_DELTA',
                     callId,
-                    toolName: part.functionCall.name,
+                    toolName: part.functionCall.name
+                      ? desanitizeToolName(part.functionCall.name)
+                      : undefined,
                     argsDelta: JSON.stringify(part.functionCall.args ?? {}),
                   };
                 }

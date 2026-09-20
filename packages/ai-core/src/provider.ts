@@ -11,6 +11,23 @@ import { ChatMessage } from './messages.js';
  * AI Provider abstraction and error normalization.
  * Authoritative baseline defined in Master Specification §16 (M13) and §18.
  */
+
+/**
+ * Sanitizes a RemoteCommander tool name (e.g. 'cpanel.security_advisor')
+ * into an LLM-compatible function identifier (e.g. 'cpanel__security_advisor')
+ * matching ^[a-zA-Z0-9_-]+$.
+ */
+export function sanitizeToolName(name: string): string {
+  return name.replace(/\./g, '__');
+}
+
+/**
+ * Desanitizes an LLM function identifier (e.g. 'cpanel__security_advisor')
+ * back into the canonical RemoteCommander tool name ('cpanel.security_advisor').
+ */
+export function desanitizeToolName(name: string): string {
+  return name.replace(/__/g, '.');
+}
 export interface ModelInfo {
   id: string;
   name: string;

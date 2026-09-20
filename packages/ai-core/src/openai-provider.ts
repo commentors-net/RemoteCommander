@@ -11,6 +11,8 @@ import {
   ModelInfo,
   UsageInfo,
   parseHTTPError,
+  sanitizeToolName,
+  desanitizeToolName,
 } from './provider.js';
 
 export interface OpenAIProviderOptions {
@@ -74,7 +76,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     };
     return {
       id: obj.id ?? `call-${Date.now()}`,
-      toolName: obj.function?.name ?? 'unknown_tool',
+      toolName: desanitizeToolName(obj.function?.name ?? 'unknown_tool'),
       argumentsJson: obj.function?.arguments ?? '{}',
     };
   }
@@ -133,7 +135,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             id: tc.id,
             type: 'function',
             function: {
-              name: tc.toolName,
+              name: sanitizeToolName(tc.toolName),
               arguments: tc.argumentsJson,
             },
           })),
@@ -160,7 +162,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       bodyPayload.tools = request.tools.map((t) => ({
         type: 'function',
         function: {
-          name: t.name,
+          name: sanitizeToolName(t.name),
           description: t.description,
           parameters: t.inputSchema,
         },
@@ -245,7 +247,7 @@ export class OpenAICompatibleProvider implements AIProvider {
                   yield {
                     type: 'TOOL_CALL_DELTA',
                     callId: tc.id ?? '',
-                    toolName: tc.function?.name,
+                    toolName: tc.function?.name ? desanitizeToolName(tc.function.name) : undefined,
                     argsDelta: tc.function?.arguments ?? '',
                   };
                 }

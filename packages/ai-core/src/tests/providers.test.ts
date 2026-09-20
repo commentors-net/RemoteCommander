@@ -3,6 +3,7 @@ import {
   AnthropicProvider,
   GeminiProvider,
   OllamaProvider,
+  OpenAICompatibleProvider,
   MockAIProvider,
   createAIProvider,
   PROVIDER_CAPABILITIES,
@@ -11,6 +12,8 @@ import {
   ToolLoopOrchestrator,
   ToolCallRequest,
   ChatStreamChunk,
+  sanitizeToolName,
+  desanitizeToolName,
 } from '../index.js';
 
 describe('M13 Multi-Provider AI: Capabilities & Factory', () => {
@@ -417,5 +420,183 @@ describe('M13 Definition of Done: Provider Invariance Across Execution Layer', (
     expect(executedToolsLog).toContain('local.system_info');
     expect(resultAnthropic.finalText).toContain('8 cores');
     expect(resultAnthropic.cancelled).toBe(false);
+  });
+});
+
+describe('M13 Multi-Provider AI: Tool Name Schema Sanitization (Regex Invariants)', () => {
+  const LLM_TOOL_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+  it('converts canonical dot-separated tool names to valid LLM function identifiers and back', () => {
+    const testCases = [
+      'cpanel.security_advisor',
+      'server.system_info',
+      'ssh.execute',
+      'safety.create_backup',
+      'multi_server.diagnostics_matrix',
+      'local.list_directory',
+    ];
+
+    for (const toolName of testCases) {
+      const sanitized = sanitizeToolName(toolName);
+      expect(sanitized).toMatch(LLM_TOOL_REGEX);
+      expect(sanitized.includes('.')).toBe(false);
+
+      const desanitized = desanitizeToolName(sanitized);
+      expect(desanitized).toBe(toolName);
+    }
+  });
+
+  it('sanitizes tools and assistant tool_calls in OpenAI API requests to strictly match regex', async () => {
+    const provider = new OpenAICompatibleProvider({
+      apiKey: 'sk-openai-test',
+    });
+
+    let capturedRequestBody: Record<string, unknown> | undefined;
+
+    const sseBody = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","function":{"name":"cpanel__security_advisor","arguments":"{}"}}]}}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseBody));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedRequestBody = JSON.parse(options.body as string);
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    });
+
+    const chunks: ChatStreamChunk[] = [];
+    for await (const chunk of provider.streamChat({
+      model: 'gpt-5-mini',
+      messages: [
+        { role: 'user', content: 'check whm security advisor' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'call_prev',
+              toolName: 'server.service_status',
+              argumentsJson: '{"service_name":"cpanel"}',
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: 'cpanel.security_advisor',
+          description: 'Scan WHM security advisor',
+          category: 'cpanel',
+          risk: 'READ_ONLY',
+          timeoutSeconds: 30,
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(capturedRequestBody).toBeDefined();
+
+    // Verify declared tools conform strictly to OpenAI pattern
+    const tools = capturedRequestBody?.tools as Array<{
+      type: string;
+      function: { name: string };
+    }>;
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.function.name).toBe('cpanel__security_advisor');
+    expect(tools[0]!.function.name).toMatch(LLM_TOOL_REGEX);
+
+    // Verify assistant tool_calls in history also conform strictly to OpenAI pattern
+    const messages = capturedRequestBody?.messages as Array<{
+      role: string;
+      tool_calls?: Array<{ function: { name: string } }>;
+    }>;
+    const assistantMsg = messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg?.tool_calls?.[0]?.function.name).toBe('server__service_status');
+    expect(assistantMsg?.tool_calls?.[0]?.function.name).toMatch(LLM_TOOL_REGEX);
+
+    // Verify stream chunk emits the canonical RemoteCommander tool name
+    const toolDelta = chunks.find((c) => c.type === 'TOOL_CALL_DELTA');
+    expect(toolDelta).toBeDefined();
+    if (toolDelta?.type === 'TOOL_CALL_DELTA') {
+      expect(toolDelta.toolName).toBe('cpanel.security_advisor');
+    }
+  });
+
+  it('sanitizes tools and functionResponses in Gemini API requests', async () => {
+    const provider = new GeminiProvider({
+      apiKey: 'gemini-key',
+    });
+
+    let capturedRequestBody: Record<string, unknown> | undefined;
+
+    const sseBody = [
+      'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"cpanel__security_advisor","args":{}}}]},"finishReason":"STOP"}]}\n\n',
+    ].join('');
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseBody));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedRequestBody = JSON.parse(options.body as string);
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    });
+
+    const chunks: ChatStreamChunk[] = [];
+    for await (const chunk of provider.streamChat({
+      model: 'gemini-2.0-flash',
+      messages: [
+        { role: 'user', content: 'Check advisor' },
+        {
+          role: 'tool',
+          toolCallId: 'call_1',
+          toolName: 'cpanel.security_advisor',
+          content: 'No critical warnings',
+        },
+      ],
+      tools: [
+        {
+          name: 'cpanel.security_advisor',
+          description: 'Scan WHM security advisor',
+          category: 'cpanel',
+          risk: 'READ_ONLY',
+          timeoutSeconds: 30,
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(capturedRequestBody).toBeDefined();
+    const tools = capturedRequestBody?.tools as Array<{
+      functionDeclarations: Array<{ name: string }>;
+    }>;
+    expect(tools[0]!.functionDeclarations[0]!.name).toBe('cpanel__security_advisor');
+    expect(tools[0]!.functionDeclarations[0]!.name).toMatch(LLM_TOOL_REGEX);
+
+    const toolChunk = chunks.find((c) => c.type === 'TOOL_CALL_DELTA');
+    expect(toolChunk).toBeDefined();
+    if (toolChunk?.type === 'TOOL_CALL_DELTA') {
+      expect(toolChunk.toolName).toBe('cpanel.security_advisor');
+    }
   });
 });

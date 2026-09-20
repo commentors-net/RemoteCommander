@@ -11,6 +11,8 @@ import {
   ModelInfo,
   UsageInfo,
   parseHTTPError,
+  sanitizeToolName,
+  desanitizeToolName,
 } from './provider.js';
 
 export interface AnthropicProviderOptions {
@@ -75,7 +77,7 @@ export class AnthropicProvider implements AIProvider {
     };
     return {
       id: obj.id ?? `call-ant-${Date.now()}`,
-      toolName: obj.name ?? 'unknown_tool',
+      toolName: desanitizeToolName(obj.name ?? 'unknown_tool'),
       argumentsJson: typeof obj.input === 'string' ? obj.input : JSON.stringify(obj.input ?? {}),
     };
   }
@@ -160,7 +162,7 @@ export class AnthropicProvider implements AIProvider {
           contentBlocks.push({
             type: 'tool_use',
             id: tc.id,
-            name: tc.toolName,
+            name: sanitizeToolName(tc.toolName),
             input: parsedInput,
           });
         }
@@ -212,7 +214,7 @@ export class AnthropicProvider implements AIProvider {
 
     if (request.tools && request.tools.length > 0) {
       bodyPayload.tools = request.tools.map((t) => ({
-        name: t.name,
+        name: sanitizeToolName(t.name),
         description: t.description,
         input_schema: t.inputSchema,
       }));
@@ -289,7 +291,7 @@ export class AnthropicProvider implements AIProvider {
                 blockIndexMap.set(eventData.index, {
                   type: block.type,
                   id: block.id ?? `call-${eventData.index}`,
-                  name: block.name ?? '',
+                  name: block.name ? desanitizeToolName(block.name) : '',
                 });
               } else if (eventType === 'content_block_delta') {
                 const delta = eventData.delta;

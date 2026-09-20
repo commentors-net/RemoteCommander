@@ -11,6 +11,8 @@ import {
   ModelInfo,
   UsageInfo,
   parseHTTPError,
+  sanitizeToolName,
+  desanitizeToolName,
 } from './provider.js';
 
 export interface OllamaProviderOptions {
@@ -106,7 +108,7 @@ export class OllamaProvider implements AIProvider {
     const args = obj.function?.arguments ?? {};
     return {
       id: obj.id ?? `call-ollama-${Date.now()}`,
-      toolName: obj.function?.name ?? 'unknown_tool',
+      toolName: desanitizeToolName(obj.function?.name ?? 'unknown_tool'),
       argumentsJson: typeof args === 'string' ? args : JSON.stringify(args),
     };
   }
@@ -171,7 +173,7 @@ export class OllamaProvider implements AIProvider {
               id: tc.id,
               type: 'function',
               function: {
-                name: tc.toolName,
+                name: sanitizeToolName(tc.toolName),
                 arguments: parsedArgs,
               },
             };
@@ -197,7 +199,7 @@ export class OllamaProvider implements AIProvider {
       bodyPayload.tools = request.tools.map((t) => ({
         type: 'function',
         function: {
-          name: t.name,
+          name: sanitizeToolName(t.name),
           description: t.description,
           parameters: t.inputSchema,
         },
@@ -270,7 +272,7 @@ export class OllamaProvider implements AIProvider {
                 yield {
                   type: 'TOOL_CALL_DELTA',
                   callId,
-                  toolName: func?.name,
+                  toolName: func?.name ? desanitizeToolName(func.name) : undefined,
                   argsDelta:
                     typeof func?.arguments === 'string'
                       ? func.arguments

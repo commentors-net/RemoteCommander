@@ -312,6 +312,7 @@ export class ToolLoopOrchestrator {
         workingMessages.push({
           role: 'tool',
           toolCallId: call.id,
+          toolName: call.toolName,
           content: wrappedOutput,
         });
 

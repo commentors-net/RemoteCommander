@@ -88,7 +88,15 @@ pub fn run() {
 
     logging::init_logging();
 
-    let db = Database::in_memory().expect("Failed to initialize database");
+    let default_db_path =
+        dirs::data_dir().map(|d| d.join("RemoteCommander").join("remote_commander.db"));
+    let db = init_database(default_db_path).unwrap_or_else(|e| {
+        tracing::error!(
+            "Failed to initialize persistent database at default path, falling back to in-memory: {}",
+            e
+        );
+        Database::in_memory().expect("Failed to initialize database")
+    });
     let secret_service = SecretService::with_os_keyring();
     let tool_registry = ToolRegistry::new();
     let approval_manager = ApprovalManager::new();
@@ -207,5 +215,17 @@ mod tests {
 
         assert!(RiskLevel::Critical.requires_explicit_approval(true));
         assert!(!RiskLevel::Low.requires_explicit_approval(true));
+    }
+
+    #[test]
+    fn test_init_database_persistent_and_fallback() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let db_path = temp_dir.path().join("subfolder").join("test_rc.db");
+        let db = init_database(Some(db_path.clone())).expect("Persistent db should initialize");
+        assert!(db_path.exists());
+        assert!(db.list_servers().is_ok());
+
+        let mem_db = init_database(None).expect("In-memory db should initialize");
+        assert!(mem_db.list_servers().is_ok());
     }
 }

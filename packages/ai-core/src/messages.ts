@@ -16,6 +16,7 @@ export interface ChatMessage {
   content: string;
   toolCalls?: ToolCallRequest[] | undefined;
   toolCallId?: string | undefined; // For role: 'tool'
+  toolName?: string | undefined; // Canonical tool name for role: 'tool'
 }
 
 /**
