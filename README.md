@@ -16,6 +16,7 @@
 RemoteCommander v1.0.0 is a hardened, production-grade desktop application engineered specifically for system administrators, SREs, and hosting providers. It bridges modern AI model reasoning (OpenAI, Anthropic Claude, Google Gemini, and local offline Ollama) with authoritative, local-first Linux fleet operations.
 
 ### The Golden Security Rule:
+
 > **The desktop application owns authority. The AI model proposes and reasons; the local native Rust runtime validates, authorizes, executes, records, and recovers.**
 
 ---
@@ -87,6 +88,7 @@ RemoteCommander/
 ## 5. Quick Start for Operators
 
 ### Step 1: Install & Launch
+
 Run in development mode or build production binaries:
 
 ```bash
@@ -101,24 +103,26 @@ npm run dev
 ```
 
 ### Step 2: Configure AI Provider & API Keys
+
 1. Open **Settings** (cog icon or `Ctrl+,`).
 2. Select your AI Provider:
    - **OpenAI:** Enter your API key (`sk-...`) and select model (e.g., `gpt-4o`).
    - **Anthropic:** Enter your Claude API key (`sk-ant-...`) and select model (e.g., `claude-3-5-sonnet`).
    - **Google Gemini:** Enter your Gemini API key and select model (`gemini-2.0-flash`).
    - **Ollama (Local / Offline):** Connect to `http://127.0.0.1:11434` for completely private, zero-cloud operations with `deepseek-r1`, `qwen2.5-coder`, or `llama3.3`.
-3. *All keys are instantly encrypted and saved to your OS Keyring.*
+3. _All keys are instantly encrypted and saved to your OS Keyring._
 
 ### Step 3: Add Servers & Start Chatting
+
 1. Go to **Servers** tab -> **Add Server**.
 2. Enter IP/hostname, SSH port (default `22`), and username.
 3. Switch to **Chat** tab and ask the assistant:
-   - *"Check disk space and system uptime on production01."*
-   - *"Inspect the last 50 lines of nginx error log."*
-   - *"List active cPanel accounts exceeding 80% disk quota."*
+   - _"Check disk space and system uptime on production01."_
+   - _"Inspect the last 50 lines of nginx error log."_
+   - _"List active cPanel accounts exceeding 80% disk quota."_
 4. When the AI proposes a command or configuration change, review the **Approval Card** with risk tier and expected impact, then click **Approve** or **Reject**.
 
-*For complete walkthroughs, read the [RemoteCommander User Manual](docs/USER_MANUAL.md).*
+_For complete walkthroughs, read the [RemoteCommander User Manual](docs/USER_MANUAL.md)._
 
 ---
 
@@ -156,6 +160,7 @@ To create release installer bundles (Windows NSIS `.exe` / `.msi`, macOS `.dmg`,
 ```bash
 npx tauri build
 ```
+
 Compiled bundles and SHA-256 manifests are generated in `apps/desktop/src-tauri/target/release/bundle/`.
 
 ---
