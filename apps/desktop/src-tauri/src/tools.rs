@@ -2138,10 +2138,7 @@ impl ToolRegistry {
                     .get("working_directory")
                     .and_then(|v| v.as_str());
 
-                let run_as = request
-                    .arguments
-                    .get("run_as")
-                    .and_then(|v| v.as_str());
+                let run_as = request.arguments.get("run_as").and_then(|v| v.as_str());
 
                 let target_server = ctx.target_server.as_ref();
                 let server_name = target_server.map(|s| s.name.as_str()).unwrap_or_else(|| {

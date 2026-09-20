@@ -5,11 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   validate:
     name: Lint, Test & Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -29,10 +30,10 @@ jobs:
             libglib2.0-dev \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
             librsvg2-dev \
             libssl-dev \
             libsecret-1-dev
+          sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -41,6 +42,9 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Build Web Application
+        run: npm run build
 
       - name: Run Secret Scanning Gate
         run: npm run security:scan
@@ -58,7 +62,7 @@ jobs:
 
       - name: Run Linters
         run: |
-          npm run lint
+          npx eslint .
           cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run TypeScript Typecheck
