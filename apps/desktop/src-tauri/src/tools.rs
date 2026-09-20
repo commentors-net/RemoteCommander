@@ -1491,6 +1491,34 @@ impl ToolRegistry {
             },
         );
 
+        // 8m. cpanel.security_advisor
+        let mut cp_sec_props = HashMap::new();
+        cp_sec_props.insert(
+            "server_id".into(),
+            ToolPropertySchema {
+                prop_type: "string".into(),
+                description: "Target server_id with WHM/cPanel enabled".into(),
+                r#enum: None,
+                default: None,
+            },
+        );
+        tools.insert(
+            "cpanel.security_advisor".into(),
+            ToolDefinition {
+                name: "cpanel.security_advisor".into(),
+                description: "Query WHM Security Advisor recommendations, warnings, and alerts to inspect server hardening status.".into(),
+                category: "cpanel".into(),
+                risk: RiskLevel::ReadOnly,
+                timeout_seconds: 45,
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: cp_sec_props,
+                    required: Some(vec!["server_id".into()]),
+                    additional_properties: Some(false),
+                },
+            },
+        );
+
         // 9a. safety.create_backup
         let mut bak_props = HashMap::new();
         bak_props.insert(
@@ -2110,6 +2138,11 @@ impl ToolRegistry {
                     .get("working_directory")
                     .and_then(|v| v.as_str());
 
+                let run_as = request
+                    .arguments
+                    .get("run_as")
+                    .and_then(|v| v.as_str());
+
                 let target_server = ctx.target_server.as_ref();
                 let server_name = target_server.map(|s| s.name.as_str()).unwrap_or_else(|| {
                     if server_id.is_empty() {
@@ -2150,6 +2183,7 @@ impl ToolRegistry {
                         "server_name": server_name,
                         "command": command,
                         "working_directory": working_directory,
+                        "run_as": run_as,
                         "timeout_seconds": timeout_seconds,
                         "simulated": true,
                         "truncated": truncated,
@@ -2190,10 +2224,17 @@ impl ToolRegistry {
                         srv.hostname.clone()
                     };
 
-                    let full_remote_cmd = if let Some(wd) = working_directory {
+                    let cmd_with_wd = if let Some(wd) = working_directory {
                         format!("cd '{}' && {}", wd, command)
                     } else {
                         command.to_string()
+                    };
+
+                    let full_remote_cmd = if let Some(user) = run_as {
+                        let escaped = cmd_with_wd.replace('\'', "'\\''");
+                        format!("sudo -u {} -i -- sh -c '{}'", user, escaped)
+                    } else {
+                        cmd_with_wd
                     };
 
                     let mut ssh_cmd = std::process::Command::new("ssh");
@@ -2820,7 +2861,8 @@ impl ToolRegistry {
             | "cpanel.account_disk_usage"
             | "cpanel.list_php_versions"
             | "cpanel.suspend_account"
-            | "cpanel.unsuspend_account" => execute_cpanel_tool(
+            | "cpanel.unsuspend_account"
+            | "cpanel.security_advisor" => execute_cpanel_tool(
                 &request.id,
                 &request.tool_name,
                 &request.arguments,
@@ -3264,6 +3306,9 @@ fn execute_cpanel_tool(
         "cpanel.unsuspend_account" => {
             let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
             format!("whmapi1 unsuspendacct user={} --output=json", user)
+        }
+        "cpanel.security_advisor" => {
+            "/usr/local/cpanel/scripts/securityadvisor --json 2>/dev/null || whmapi1 securityadvisor_get_advice --output=json".to_string()
         }
         _ => {
             return Err(AppError::NotFound(format!(
@@ -4184,6 +4229,7 @@ mod tests {
             "cpanel.list_php_versions",
             "cpanel.suspend_account",
             "cpanel.unsuspend_account",
+            "cpanel.security_advisor",
         ];
 
         for tool_name in cpanel_tools {

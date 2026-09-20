@@ -45,7 +45,11 @@
    - [Log Streaming & Error Diagnosis](#83-log-streaming--error-diagnosis)
    - [cPanel User & Hosting Administration](#84-cpanel-user--hosting-administration)
 9. [Multi-Server Operations](#9-multi-server-operations)
-10. [Troubleshooting & Frequently Asked Questions (FAQ)](#10-troubleshooting--frequently-asked-questions-faq)
+10. [Real-World Production Scenarios & Operator Runbooks](#10-real-world-production-scenarios--operator-runbooks)
+    - [Scenario 1: WordPress Fleet Health & Safe Updates (as User)](#101-scenario-1-wordpress-fleet-health--safe-updates-as-user)
+    - [Scenario 2: WHM Security Advisor Warning Resolution (as Root)](#102-scenario-2-whm-security-advisor-warning-resolution-as-root)
+    - [Scenario 3: Server-Aware New Application Scaffolding & Deployment (from Attached Specs)](#103-scenario-3-server-aware-new-application-scaffolding--deployment-from-attached-specs)
+11. [Troubleshooting & Frequently Asked Questions (FAQ)](#11-troubleshooting--frequently-asked-questions-faq)
 
 ---
 
@@ -484,7 +488,190 @@ _Note: Destructive or state-changing write operations can never be run in batch 
 
 ---
 
-## 10. Troubleshooting & Frequently Asked Questions (FAQ)
+## 10. Real-World Production Scenarios & Operator Runbooks
+
+RemoteCommander is engineered to execute complex, multi-step sysadmin and DevOps workflows while strictly maintaining the **Golden Security Rule**: _the desktop application owns authority; the model proposes and reasons; the local native runtime validates, authorizes, executes, records, and recovers._
+
+Below are three authentic production scenarios demonstrating how RemoteCommander safely interprets operator instructions, verifies feasibility, executes targeted tool pipelines, and provides instant rollback protection.
+
+---
+
+### 10.1 Scenario 1: WordPress Fleet Health & Safe Updates (as User)
+
+#### Operator Prompt
+
+> _"As user `alfa` check the installed WordPress sites on `production01` and find what is causing high load or errors. If any updates are needed without breaking the sites, perform them."_
+
+#### Feasibility Assessment & Architecture Validation
+
+- **Is this action feasible?** **YES.**
+- **Enforcement Mechanisms:**
+  1. **User Privilege Isolation (`run_as`)**: If the active SSH session is authenticated as `root`, RemoteCommander automatically dispatches commands using `run_as: "alfa"` (via `sudo -u alfa -i -- sh -c '...'`). This ensures all generated files, cache directories, and WP-CLI commands strictly respect `alfa`'s file ownership, group permissions, and disk quotas.
+  2. **Multi-Site Discovery**: Scans `/home/alfa` for `wp-config.php` files to locate all primary, subdomain, and staging WordPress instances.
+  3. **Non-Destructive Diagnostic Sweep**: Inspects `/home/alfa/logs/error_log` and `wp-content/debug.log` using `server.tail_log` to pinpoint fatal PHP errors, deprecated hooks, or runaway database queries.
+  4. **Pre-Modification Snapshot**: Before executing any update, RemoteCommander automatically takes an atomic database dump (`wp db export`) and files snapshot (`safety.create_backup`), guaranteeing a verified restore point.
+  5. **Automated Post-Update Health Verification**: Following updates, the assistant automatically issues a local HTTP probe (`curl -s -I -H "Host: domain.com" http://127.0.0.1/`) to confirm HTTP `200 OK`. If a `500 Internal Server Error` or white-screen-of-death is detected, `safety.rollback_file` immediately reverts the files!
+
+#### Step-by-Step Execution Lifecycle
+
+```text
+Operator Prompt: "As user alfa check the installed WordPress sites..."
+       │
+       ▼
+[STEP 1: DISCOVERY] ──> ssh.execute (server_id: "production01", command: "find /home/alfa -maxdepth 4 -name 'wp-config.php'", run_as: "alfa")
+       │                 Output: /home/alfa/public_html/wp-config.php (Site: myblog.com)
+       ▼
+[STEP 2: DIAGNOSIS] ──> server.tail_log (path: "/home/alfa/logs/error_log", lines: 50)
+       │                 Finding: "PHP Fatal error: Outdated plugin 'woocommerce-gateway' incompatible with PHP 8.2"
+       ▼
+[STEP 3: INTEGRITY] ──> ssh.execute (command: "wp plugin list --status=active --format=json", run_as: "alfa", working_directory: "/home/alfa/public_html")
+       │                 Identified 1 outdated plugin with security patch available.
+       ▼
+[STEP 4: SAFETY GATE] ──> UI presents Approval Card:
+       │                   Tool: safety.create_backup & ssh.execute (wp plugin update)
+       │                   Risk: MEDIUM (Safe Automation prompts for approval on Production)
+       │                   Action: Operator clicks [Approve]
+       ▼
+[STEP 5: SAFE UPDATE] ──> 1. Exports database: wp db export /home/alfa/backups/pre-update.sql
+       │                  2. Updates plugin: wp plugin update woocommerce-gateway
+       │                  3. Verifies site health: curl -I -s https://myblog.com/ -> HTTP 200 OK
+       ▼
+[STEP 6: AUDIT LOG] ──> All actions synchronously committed to SQLite audit trail.
+```
+
+#### Sample Approval Card in Chat UI
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ 🛡️ APPROVAL REQUIRED: WordPress Plugin Update                   │
+│ Target Server: production01 (PRODUCTION)                         │
+│ Operating As:  alfa (User ID: 1002)                              │
+│ Risk Tier:     MEDIUM                                            │
+│ Target Path:   /home/alfa/public_html/wp-content/plugins/        │
+│                                                                  │
+│ Proposed Actions:                                                │
+│ 1. Database snapshot -> /home/alfa/backups/wp-db-pre-update.sql   │
+│ 2. Backup plugin folder -> woocommerce-gateway.bak.20260920      │
+│ 3. Execute: wp plugin update woocommerce-gateway                │
+│ 4. HTTP Health Probe & Auto-Rollback on failure                  │
+│                                                                  │
+│ [ Approve (Enter) ]                       [ Reject Execution ]  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 10.2 Scenario 2: WHM Security Advisor Warning Resolution (as Root)
+
+#### Operator Prompt
+
+> _"As root user check why WHM's Security Advisor is giving warnings on `cpanel-srv01` and do the needful."_
+
+#### Feasibility Assessment & Architecture Validation
+
+- **Is this action feasible?** **YES.**
+- **Enforcement Mechanisms:**
+  1. **Native WHM API Integration (`cpanel.security_advisor`)**: RemoteCommander queries the native WHM Security Advisor subsystem (`/usr/local/cpanel/scripts/securityadvisor --json` or `whmapi1 securityadvisor_get_advice`) directly over authenticated direct transport.
+  2. **Structured Advisory Parsing**: Security findings are classified into severity levels (`warn`, `alert`, `good`, `info`). The AI presents each issue alongside its operational impact and blast radius.
+  3. **Atomic Configuration Patching (`safety.safe_patch`)**: To fix configuration warnings (e.g. disabling SSH password authentication in `/etc/ssh/sshd_config`), the assistant uses `safety.safe_patch` with syntax validation (`sshd -t`). If the syntax validation fails, the patch is **aborted and rolled back automatically before `sshd` is reloaded**, preventing lockout!
+  4. **Strict Approval Gate**: Critical infrastructure hardening (compilers, firewalls, cPHulk) requires explicit user approval before execution.
+
+#### Step-by-Step Execution Lifecycle
+
+```text
+Operator Prompt: "As root check why WHM Security Advisor is giving warnings..."
+       │
+       ▼
+[STEP 1: QUERY] ──> cpanel.security_advisor (server_id: "cpanel-srv01")
+       │             Returns JSON:
+       │             - WARNING 1: SSH PasswordAuthentication is enabled (Port 22)
+       │             - WARNING 2: C/C++ Compilers accessible to unprivileged users
+       │             - INFO: Kernel version is up to date (no reboot needed)
+       ▼
+[STEP 2: ANALYSIS & REMEDIATION PLAN]
+       │  Assistant responds in chat:
+       │  "WHM Security Advisor reported 2 warnings:
+       │   1. SSH Password Authentication: Risk of brute-force attacks.
+       │      Remediation: Set 'PasswordAuthentication no' in /etc/ssh/sshd_config.
+       │      Safety: Validated via 'sshd -t' before reload.
+       │   2. Compiler Access: Users can compile local exploit binaries.
+       │      Remediation: Run '/scripts/compilers off'."
+       ▼
+[STEP 3: OPERATOR CONFIRMATION]
+       │  UI displays Approval Card with pre-flight diff and validation check.
+       │  Operator clicks [Approve].
+       ▼
+[STEP 4: EXECUTION]
+       │  1. safety.safe_patch applies /etc/ssh/sshd_config update with 'sshd -t'.
+       │  2. ssh.execute runs '/scripts/compilers off'.
+       ▼
+[STEP 5: RE-SCAN]
+       │  cpanel.security_advisor queries again: status = ALL CLEAR (0 warnings).
+```
+
+---
+
+### 10.3 Scenario 3: Server-Aware New Application Scaffolding & Deployment (from Attached Specs)
+
+#### Operator Prompt
+
+> _"As user `appuser` on `srv-app-01` I am creating a new URL shortening microservice. The specs are attached below. Inspect the server architecture, generate the necessary code compatible with this environment, optimize for fast execution, and set up an easily manageable systemd service."_
+
+#### Feasibility Assessment & Architecture Validation
+
+- **Is this action feasible?** **YES.**
+- **Enforcement Mechanisms:**
+  1. **Architecture & Runtime Discovery**:
+     - `server.system_info`: Inspects OS distribution (`AlmaLinux 9.4`), CPU architecture (`x86_64`), core count, and memory ceiling.
+     - `ssh.execute`: Detects installed language runtimes (`node -v`, `python3 -V`, `rustc -V`, `php -v`). If Node.js 20 LTS and Python 3.11 are detected, the assistant selects the runtime providing maximum throughput and low maintenance (e.g. Node.js with native `fetch` and SQLite/Redis or Python with FastAPI).
+     - `server.service_status` & `server.network_connections`: Detects active reverse proxies (`nginx`) and finds an unassigned high port (e.g. `127.0.0.1:3000`).
+  2. **Isolated Project Scaffolding**:
+     - Scaffolds project files in `/home/appuser/apps/url-shortener` using `ssh.execute` (`mkdir -p`) and `ssh.write_file`.
+     - Generates clean, production-ready code with parameter validation, structured JSON logging, and in-memory or SQLite caching.
+  3. **Production Process Management**:
+     - Deploys a managed systemd service unit (`/etc/systemd/system/url-shortener.service` if root or `systemctl --user` as `appuser`) with automatic restarts (`Restart=always`), resource limits (`MemoryMax=512M`), and security sandboxing (`ProtectSystem=full`).
+  4. **Zero-Downtime Nginx Reverse Proxy Setup**:
+     - Deploys an Nginx location block with `safety.safe_patch` and `nginx -t` pre-flight validation.
+  5. **Operational Verification**:
+     - Verifies socket listening on `127.0.0.1:3000` via `server.network_connections`.
+     - Inspects service status via `server.service_status`.
+     - Tails startup output via `server.tail_log` to confirm 0 startup exceptions.
+
+#### Execution Timeline & Tool Flow
+
+```text
+Operator attaches spec: { "service": "url-shortener", "endpoints": ["/shorten", "/:code"] }
+       │
+       ▼
+[PHASE 1: ARCHITECTURE DISCOVERY]
+├── server.system_info ─────────> AlmaLinux 9.4 (x86_64), 4 vCPUs, 8GB RAM
+├── ssh.execute ("node -v") ────> Node.js v20.14.0 (LTS) detected
+└── server.service_status ──────> nginx is Active (running)
+       │
+       ▼
+[PHASE 2: CODE GENERATION & SCAFFOLDING]
+├── ssh.execute ────────────────> mkdir -p /home/appuser/apps/url-shortener
+├── ssh.write_file ─────────────> package.json (fastify, @fastify/cors)
+├── ssh.write_file ─────────────> src/server.js (optimized async fastify server)
+└── ssh.execute (run_as: appuser)> npm install --production
+       │
+       ▼
+[PHASE 3: SERVICE MANAGEMENT SETUP]
+├── safety.safe_patch ──────────> /etc/systemd/system/url-shortener.service
+│                                  (Restart=always, User=appuser, Port=3000)
+├── ssh.execute ────────────────> systemctl daemon-reload && systemctl enable --now url-shortener
+└── safety.safe_patch ──────────> /etc/nginx/conf.d/url-shortener.conf (validation: "nginx -t")
+       │
+       ▼
+[PHASE 4: LIVE VERIFICATION]
+├── server.network_connections ─> 127.0.0.1:3000 [LISTEN] (PID 41208, node)
+├── ssh.execute ────────────────> curl -s http://127.0.0.1:3000/health -> {"status":"ok"}
+└── server.tail_log ────────────> /home/appuser/apps/url-shortener/logs/app.log -> "Server listening"
+```
+
+---
+
+## 11. Troubleshooting & Frequently Asked Questions (FAQ)
 
 ### Q1: I received an "API Rate Limit (HTTP 429)" error. What should I do?
 

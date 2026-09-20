@@ -647,6 +647,41 @@ impl CpanelManager {
                 };
                 Ok(serde_json::to_value(res)?)
             }
+            "cpanel.security_advisor" => {
+                let advisories = serde_json::json!({
+                    "status": 1,
+                    "server": server_name,
+                    "warnings_count": 2,
+                    "alerts_count": 0,
+                    "scanned_at": chrono::Utc::now().to_rfc3339(),
+                    "advisories": [
+                        {
+                            "module": "SecurityAdvisor::SSH",
+                            "type": "warn",
+                            "key": "ssh_password_auth",
+                            "text": "SSH password authentication is currently permitted. Key-based authentication is strongly recommended to prevent brute-force intrusion.",
+                            "advice": "Disable PasswordAuthentication in /etc/ssh/sshd_config and restart sshd.",
+                            "remediation_command": "sed -i 's/^#*PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl reload sshd"
+                        },
+                        {
+                            "module": "SecurityAdvisor::Compilers",
+                            "type": "warn",
+                            "key": "compiler_access",
+                            "text": "C/C++ Compilers are accessible by unprivileged users on this server.",
+                            "advice": "Disable compiler access for unprivileged accounts in WHM > Compiler Access or via '/scripts/compilers off'.",
+                            "remediation_command": "/scripts/compilers off"
+                        },
+                        {
+                            "module": "SecurityAdvisor::Kernel",
+                            "type": "good",
+                            "key": "kernel_status",
+                            "text": "The operating system is running the current patched kernel version.",
+                            "advice": "No reboot or kernel update required at this time."
+                        }
+                    ]
+                });
+                Ok(advisories)
+            }
             _ => Err(AppError::NotFound(format!(
                 "Unknown cPanel tool: {}",
                 tool_name
@@ -744,6 +779,7 @@ mod tests {
             "cpanel.list_php_versions",
             "cpanel.suspend_account",
             "cpanel.unsuspend_account",
+            "cpanel.security_advisor",
         ];
 
         let args = serde_json::json!({

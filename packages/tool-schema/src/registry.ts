@@ -134,6 +134,11 @@ export function createDefaultToolRegistry(): ToolRegistry {
           type: 'string',
           description: 'Optional working directory to change into before executing',
         },
+        run_as: {
+          type: 'string',
+          description:
+            'Optional Linux username to execute the command as (e.g. via sudo -u <user> -i)',
+        },
       },
       required: ['server_id', 'command'],
     },
@@ -640,6 +645,22 @@ export function createDefaultToolRegistry(): ToolRegistry {
         user: { type: 'string', description: 'Username of the cPanel account to unsuspend' },
       },
       required: ['server_id', 'user'],
+    },
+  });
+
+  registry.register({
+    name: 'cpanel.security_advisor',
+    description:
+      'Query WHM Security Advisor recommendations, warnings, and alerts to inspect server hardening and security status.',
+    category: 'cpanel',
+    risk: 'READ_ONLY',
+    timeoutSeconds: 45,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server_id: { type: 'string', description: 'Target server_id with WHM/cPanel enabled' },
+      },
+      required: ['server_id'],
     },
   });
 
