@@ -54,6 +54,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
     message: string;
   } | null>(null);
 
+  // Inline API Key input state
+  const [inlineKeyMode, setInlineKeyMode] = useState<'select' | 'new'>('select');
+  const [inlineKeyLabel, setInlineKeyLabel] = useState('');
+  const [inlineKeyValue, setInlineKeyValue] = useState('');
+  const [inlineKeySaving, setInlineKeySaving] = useState(false);
+  const [inlineKeyMsg, setInlineKeyMsg] = useState<string | null>(null);
+  const [aiConfigSaved, setAiConfigSaved] = useState(false);
+
   const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(DEFAULT_PRIVACY_SETTINGS);
   const [providerDisclosure, setProviderDisclosure] = useState<ProviderDisclosureInfo | null>(null);
   const [pruneResultMsg, setPruneResultMsg] = useState<string | null>(null);
@@ -276,6 +284,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
     }
   };
 
+  const handleSaveInlineKey = async () => {
+    if (!inlineKeyValue.trim()) return;
+    setInlineKeySaving(true);
+    setInlineKeyMsg(null);
+    try {
+      const defaultLabel = inlineKeyLabel.trim() || `${provider.toUpperCase()} API Key`;
+      const saved = await Bridge.saveSecret('AI_API_KEY', defaultLabel, inlineKeyValue.trim());
+      await loadCredentials();
+      setApiKeyRef(saved.id);
+      setInlineKeyValue('');
+      setInlineKeyLabel('');
+      setInlineKeyMode('select');
+      setInlineKeyMsg(`✓ Key "${saved.label}" saved to Windows Keyring and selected!`);
+      // Also automatically update AI configuration with the new key ref
+      await Bridge.setAIConfig({
+        provider,
+        model,
+        baseUrl: baseUrl || undefined,
+        apiKeySecretRef: saved.id,
+      });
+      setTimeout(() => setInlineKeyMsg(null), 3500);
+    } catch (err: unknown) {
+      setInlineKeyMsg(`Error saving key: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setInlineKeySaving(false);
+    }
+  };
+
+  const handleSaveAIConfig = async () => {
+    await Bridge.setAIConfig({
+      provider,
+      model,
+      baseUrl: baseUrl || undefined,
+      apiKeySecretRef: apiKeyRef || undefined,
+    });
+    setAiConfigSaved(true);
+    setTimeout(() => setAiConfigSaved(false), 2500);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     await Bridge.setSetting('permission_mode', JSON.stringify(currentMode));
@@ -449,7 +496,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
                 AI Provider Configuration (M13 Multi-Provider)
               </h3>
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -466,8 +513,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
                   <>Test Connection</>
                 )}
               </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+                onClick={handleSaveAIConfig}
+              >
+                <Save size={13} /> Save AI Configuration
+              </button>
             </div>
           </div>
+
+          {aiConfigSaved && (
+            <div
+              style={{
+                color: '#3fb950',
+                fontSize: '13px',
+                fontWeight: 500,
+                marginBottom: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <CheckCircle2 size={15} /> AI configuration saved successfully!
+            </div>
+          )}
 
           <div
             style={{
@@ -559,30 +636,135 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
             </div>
 
             <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>
-                API Key (Native OS Keyring Ref)
-              </label>
-              {PROVIDER_CAPABILITIES[provider]?.requiresApiKey ? (
-                <>
-                  <select
-                    className="chat-input"
-                    style={{ width: '100%' }}
-                    value={apiKeyRef}
-                    onChange={(e) => setApiKeyRef(e.target.value)}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '6px',
+                }}
+              >
+                <label style={{ fontWeight: 600 }}>API Key (Native OS Keyring)</label>
+                {PROVIDER_CAPABILITIES[provider]?.requiresApiKey && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{
+                      fontSize: '11px',
+                      padding: '2px 8px',
+                      color: inlineKeyMode === 'new' ? '#58a6ff' : '#8b949e',
+                      borderColor: inlineKeyMode === 'new' ? '#388bfd' : '#30363d',
+                    }}
+                    onClick={() => {
+                      setInlineKeyMode(inlineKeyMode === 'new' ? 'select' : 'new');
+                      setInlineKeyMsg(null);
+                    }}
                   >
-                    <option value="">-- Select Keyring Secret --</option>
-                    {credentials
-                      .filter((c) => c.type === 'AI_API_KEY')
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label} ({c.id.slice(0, 16)}...)
-                        </option>
-                      ))}
-                  </select>
-                  <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '4px' }}>
-                    Stored securely in Windows Credential Manager. Zero plaintext in storage.
+                    {inlineKeyMode === 'new' ? '← Choose Existing' : '+ Add New Key'}
+                  </button>
+                )}
+              </div>
+
+              {PROVIDER_CAPABILITIES[provider]?.requiresApiKey ? (
+                inlineKeyMode === 'new' ||
+                credentials.filter((c) => c.type === 'AI_API_KEY').length === 0 ? (
+                  <div
+                    style={{
+                      padding: '12px',
+                      borderRadius: '6px',
+                      backgroundColor: '#161b22',
+                      border: '1px solid #30363d',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '2 1 180px', position: 'relative' }}>
+                        <input
+                          type="password"
+                          className="chat-input"
+                          style={{ width: '100%', paddingRight: '30px' }}
+                          placeholder={`Enter ${provider} API Key (e.g. sk-...)`}
+                          value={inlineKeyValue}
+                          onChange={(e) => setInlineKeyValue(e.target.value)}
+                        />
+                        <Lock
+                          size={14}
+                          style={{
+                            position: 'absolute',
+                            right: '10px',
+                            top: '10px',
+                            color: '#8b949e',
+                          }}
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        className="chat-input"
+                        style={{ flex: '1 1 120px' }}
+                        placeholder="Label (optional)"
+                        value={inlineKeyLabel}
+                        onChange={(e) => setInlineKeyLabel(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                        onClick={handleSaveInlineKey}
+                        disabled={inlineKeySaving || !inlineKeyValue.trim()}
+                      >
+                        {inlineKeySaving ? 'Saving...' : 'Save to Keyring'}
+                      </button>
+                      {credentials.filter((c) => c.type === 'AI_API_KEY').length > 0 && (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: '12px', padding: '6px 10px' }}
+                          onClick={() => setInlineKeyMode('select')}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#8b949e' }}>
+                      🔒 Stored strictly in Windows Credential Manager. Zero plaintext saved to
+                      disk.
+                    </div>
                   </div>
-                </>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <select
+                        className="chat-input"
+                        style={{ width: '100%' }}
+                        value={apiKeyRef}
+                        onChange={(e) => setApiKeyRef(e.target.value)}
+                      >
+                        <option value="">-- Select Keyring Secret --</option>
+                        {credentials
+                          .filter((c) => c.type === 'AI_API_KEY')
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.label} ({c.id.slice(0, 16)}...)
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                        onClick={() => setInlineKeyMode('new')}
+                        title="Enter and save a new API key"
+                      >
+                        + New
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '4px' }}>
+                      Stored securely in Windows Credential Manager. Zero plaintext in storage.
+                    </div>
+                  </>
+                )
               ) : (
                 <div
                   style={{
@@ -595,6 +777,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
                   }}
                 >
                   ✓ Local execution: No API key required for {provider}.
+                </div>
+              )}
+
+              {inlineKeyMsg && (
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: inlineKeyMsg.startsWith('✓') ? '#3fb950' : '#f85149',
+                    marginTop: '6px',
+                    fontWeight: 500,
+                  }}
+                >
+                  {inlineKeyMsg}
                 </div>
               )}
             </div>
