@@ -284,4 +284,17 @@ mod tests {
         assert!(service.list_credentials(&db).unwrap().is_empty());
         assert!(service.get_secret(&db, &record.id).is_err());
     }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_os_keyring_store_windows() {
+        let store = OsKeyringStore::new();
+        let key = "cred:ai_api_key:test-windows-credential";
+        let secret = "sk-test-123456789";
+        let put_res = store.put(key, secret);
+        assert!(put_res.is_ok());
+        let get_res = store.get(key);
+        assert_eq!(get_res.unwrap(), secret);
+        let _ = store.delete(key);
+    }
 }
