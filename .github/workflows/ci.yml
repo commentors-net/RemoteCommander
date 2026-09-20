@@ -72,4 +72,9 @@ jobs:
         run: npm test
 
       - name: Run Rust Tests
-        run: cargo test --workspace
+        env:
+          REMOTE_COMMANDER_MOCK_SSH: '1'
+          REMOTE_COMMANDER_MOCK_SFTP: '1'
+          REMOTE_COMMANDER_MOCK_TERMINAL: '1'
+        run: cargo test --workspace -- --nocapture
+

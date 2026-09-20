@@ -353,6 +353,31 @@ mod tests {
                 download_url: "https://releases.remotecommander.com/v0.2.0/setup.exe".into(),
             },
         );
+        platforms.insert(
+            "linux-x64".into(),
+            ReleaseAssetRecord {
+                platform: "linux-x64".into(),
+                package_type: "appimage".into(),
+                filename: "RemoteCommander-0.2.0.AppImage".into(),
+                sha256: "def456sha256".into(),
+                signature: BASE64_STANDARD.encode(vec![0x77; 64]),
+                download_url:
+                    "https://releases.remotecommander.com/v0.2.0/RemoteCommander-0.2.0.AppImage"
+                        .into(),
+            },
+        );
+        platforms.insert(
+            "darwin-x64".into(),
+            ReleaseAssetRecord {
+                platform: "darwin-x64".into(),
+                package_type: "dmg".into(),
+                filename: "RemoteCommander-0.2.0.dmg".into(),
+                sha256: "ghi789sha256".into(),
+                signature: BASE64_STANDARD.encode(vec![0x77; 64]),
+                download_url:
+                    "https://releases.remotecommander.com/v0.2.0/RemoteCommander-0.2.0.dmg".into(),
+            },
+        );
 
         let manifest = ReleaseManifestRecord {
             version: "0.2.0".into(),
