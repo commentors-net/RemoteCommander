@@ -22,10 +22,14 @@
     "supply-chain:verify": "node scripts/verify-supply-chain.mjs",
     "rust:test": "cargo test --workspace",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
-    "rust:fmt": "cargo fmt --all -- --check"
+    "rust:fmt": "cargo fmt --all -- --check",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
+    "@tauri-apps/cli": "^2.11.5",
     "eslint": "^9.20.0",
     "globals": "^17.12.0",
     "prettier": "^3.5.0",
