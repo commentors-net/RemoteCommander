@@ -1,6 +1,6 @@
 # Implementation Milestone Roadmap
 
-> **Document Note**: Full detailed requirements for each milestone are located in Appendix A of [`MASTER_SPEC_with_MILESTONES_Secure_Desktop_AI_Operations_Assistant.md`](file:///D:/Jobs/workspace/RemoteCommander/MASTER_SPEC_with_MILESTONES_Secure_Desktop_AI_Operations_Assistant.md#L4210-L5840).
+> **Document Note**: Full detailed requirements for each milestone are located in Appendix A of [`docs/MASTER_SPEC.md`](file:///D:/Jobs/workspace/RemoteCommander/docs/MASTER_SPEC.md#L4210-L5840).
 
 ## Milestone Overview
 

@@ -85,6 +85,3 @@ scratch/
 # SSH temporary/known hosts
 known_hosts
 known_hosts.old
-
-# User reference directory
-/not-important/

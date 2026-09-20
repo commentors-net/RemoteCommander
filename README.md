@@ -44,11 +44,14 @@ RemoteCommander v1.0.0 is a hardened, production-grade desktop application engin
 
 ## 3. Comprehensive Documentation
 
-- **[User Manual (Getting Started & Operations Runbook)](docs/USER_MANUAL.md)**: Detailed guide on configuring OpenAI / Anthropic / Gemini / Ollama API keys, adding remote servers, understanding risk tiers, managing approvals, running terminal commands, editing files, and managing cPanel/WHM.
-- **[v1.0 Production Release Notes](docs/RELEASE_NOTES_v1.0.md)**: Release highlights, architectural summary, distro compatibility matrix, and verification report.
-- **[Milestone Roadmap](docs/MILESTONES.md)**: Status of all milestones M0 through M18.
-- **[System Architecture](docs/architecture.md)**: Deep dive into the Tauri + React + Rust IPC pipeline and policy runtime.
-- **[Threat Model & Security Invariants](docs/threat-model.md)**: Security boundaries, asset classification, and attack mitigations.
+- **[User Manual (Getting Started & Operations Runbook)](docs/USER_MANUAL.md)**: Operator guide covering AI provider API key configuration (OpenAI, Claude, Gemini, Ollama), OS keyring isolation, server inventory, risk tiers, human-in-the-loop approvals, PTY terminal operations, and WHM/cPanel management.
+- **[v1.0 Production Release Notes](docs/RELEASE_NOTES_v1.0.md)**: Release highlights, distro compatibility matrix, supply chain verification, and security sign-off.
+- **[Master Specification](docs/MASTER_SPEC.md)**: Complete authoritative engineering specification, technical invariants, and architecture baseline.
+- **[Milestone Roadmap](docs/MILESTONES.md)**: Detailed delivery milestones (M0 through M18) and cross-milestone security gates.
+- **[System Architecture](docs/architecture.md)**: Deep dive into the Tauri + React + Rust IPC pipeline, Tokio runtime, and native execution boundaries.
+- **[Security Policy & Invariants](docs/security.md)**: Non-negotiable security requirements and risk tier definitions.
+- **[Threat Model & Asset Boundaries](docs/threat-model.md)**: System assets, trust boundaries, and attack mitigations.
+- **[Testing Strategy & Operational Vectors](docs/testing-strategy.md)**: Multi-tiered verification strategy, 10 operational verification vectors, and CI gates.
 
 ---
 
@@ -67,12 +70,12 @@ RemoteCommander/
 ├── docs/
 │   ├── USER_MANUAL.md            # Comprehensive user operator guide
 │   ├── RELEASE_NOTES_v1.0.md     # Production release notes for v1.0.0 GA
+│   ├── MASTER_SPEC.md            # Authoritative architecture and build specification
 │   ├── MILESTONES.md             # Implementation roadmap & delivery gates
-│   ├── ALPHA_TEST_PLAN.md        # Private Alpha testing protocol
 │   ├── architecture.md           # System topology & tool execution pipeline
 │   ├── threat-model.md           # Assets, boundaries, and threat mitigations
 │   ├── security.md               # Non-negotiable security invariants
-│   ├── testing-strategy.md       # Multi-tiered verification strategy
+│   ├── testing-strategy.md       # Multi-tiered verification & operational vectors
 │   └── adr/                      # Architecture Decision Records (0001–0006)
 ├── scripts/
 │   ├── scan-secrets.mjs          # Secret scanner (Gate A verification)
