@@ -295,7 +295,9 @@ export class AnthropicProvider implements AIProvider {
                 });
               } else if (eventType === 'content_block_delta') {
                 const delta = eventData.delta;
-                if (delta?.type === 'text_delta' && delta.text) {
+                if (delta?.type === 'thinking_delta' && delta.thinking) {
+                  yield { type: 'THOUGHT_DELTA', thought: delta.thinking };
+                } else if (delta?.type === 'text_delta' && delta.text) {
                   yield { type: 'TEXT_DELTA', delta: delta.text };
                 } else if (delta?.type === 'input_json_delta' && delta.partial_json) {
                   const blockMeta = blockIndexMap.get(eventData.index);

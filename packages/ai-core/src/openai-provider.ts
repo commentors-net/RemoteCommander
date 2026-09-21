@@ -147,15 +147,30 @@ export class OpenAICompatibleProvider implements AIProvider {
       };
     });
 
+    const isReasoning =
+      request.model.startsWith('o1') ||
+      request.model.startsWith('o3') ||
+      request.model.startsWith('gpt-5') ||
+      request.model.includes('reasoning') ||
+      request.model.includes('preview');
+
     const bodyPayload: Record<string, unknown> = {
       model: request.model,
       messages: formattedMessages,
       stream: true,
-      temperature: request.temperature ?? 0.2,
     };
 
+    // Reasoning models (o1, o3, gpt-5) only accept default temperature (1) or reject temperature entirely.
+    if (!isReasoning) {
+      bodyPayload.temperature = request.temperature ?? 0.2;
+    }
+
     if (request.maxTokens) {
-      bodyPayload.max_tokens = request.maxTokens;
+      if (isReasoning) {
+        bodyPayload.max_completion_tokens = request.maxTokens;
+      } else {
+        bodyPayload.max_tokens = request.maxTokens;
+      }
     }
 
     if (request.tools && request.tools.length > 0) {
@@ -196,7 +211,40 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw parseHTTPError(this.providerId, response.status, errText);
+      // Automatic fallback if provider rejects temperature or max_tokens on specific models
+      if (
+        response.status === 400 &&
+        errText.includes('temperature') &&
+        bodyPayload.temperature !== undefined
+      ) {
+        delete bodyPayload.temperature;
+        fetchOptions.body = JSON.stringify(bodyPayload);
+        try {
+          response = await fetch(`${this.baseUrl}/chat/completions`, fetchOptions);
+        } catch (retryErr: unknown) {
+          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          throw parseHTTPError(this.providerId, 0, `Network request failed: ${msg}`);
+        }
+      } else if (
+        response.status === 400 &&
+        errText.includes('max_tokens') &&
+        bodyPayload.max_tokens !== undefined
+      ) {
+        bodyPayload.max_completion_tokens = bodyPayload.max_tokens;
+        delete bodyPayload.max_tokens;
+        fetchOptions.body = JSON.stringify(bodyPayload);
+        try {
+          response = await fetch(`${this.baseUrl}/chat/completions`, fetchOptions);
+        } catch (retryErr: unknown) {
+          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          throw parseHTTPError(this.providerId, 0, `Network request failed: ${msg}`);
+        }
+      }
+
+      if (!response.ok) {
+        const finalErrText = await response.text();
+        throw parseHTTPError(this.providerId, response.status, finalErrText);
+      }
     }
 
     if (!response.body) {
@@ -238,6 +286,12 @@ export class OpenAICompatibleProvider implements AIProvider {
               if (!choice) continue;
 
               const delta = choice.delta;
+              // Check for model thought / reasoning tokens (OpenAI o1/o3/gpt-5, DeepSeek, Ollama /v1)
+              const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+              if (reasoning) {
+                yield { type: 'THOUGHT_DELTA', thought: reasoning };
+              }
+
               if (delta?.content) {
                 yield { type: 'TEXT_DELTA', delta: delta.content };
               }

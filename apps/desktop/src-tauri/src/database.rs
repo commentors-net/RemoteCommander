@@ -3,7 +3,8 @@
 
 use crate::error::AppError;
 use crate::models::{
-    ApprovalRecord, AuditEventRecord, KnownHostRecord, ServerRecord, SettingRecord, ToolCallRecord,
+    ApprovalRecord, AuditEventRecord, ConversationRecord, KnownHostRecord, MessageRecord,
+    ServerRecord, SettingRecord, ToolCallRecord,
 };
 use crate::secret::CredentialRefRecord;
 use chrono::Utc;
@@ -263,7 +264,7 @@ impl Database {
             "SELECT id, name, hostname, port, username, environment, auth_method,
                     credential_ref, ssh_key_path, ssh_config_alias, cpanel_enabled, whm_port, whm_token_ref,
                     tags_json, created_at, updated_at
-             FROM servers WHERE id = ?1",
+             FROM servers WHERE id = ?1 OR LOWER(name) = LOWER(?1) OR LOWER(hostname) = LOWER(?1) OR LOWER(ssh_config_alias) = LOWER(?1)",
         )?;
 
         let mut rows = stmt.query(params![id])?;
@@ -832,6 +833,162 @@ impl Database {
         })
     }
 
+    pub fn save_conversation(&self, conv: &ConversationRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, server_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                server_id = excluded.server_id,
+                updated_at = excluded.updated_at",
+            params![
+                conv.id,
+                conv.title,
+                conv.server_id,
+                conv.created_at,
+                conv.updated_at,
+            ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_conversations(
+        &self,
+        server_id: Option<&str>,
+    ) -> Result<Vec<ConversationRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut out = Vec::new();
+        if let Some(sid) = server_id {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, server_id, created_at, updated_at FROM conversations \
+                     WHERE server_id = ?1 OR server_id IS NULL ORDER BY updated_at DESC LIMIT 100",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let rows = stmt
+                .query_map(params![sid], |row| {
+                    Ok(ConversationRecord {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        server_id: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for r in rows {
+                out.push(r.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, server_id, created_at, updated_at FROM conversations \
+                     ORDER BY updated_at DESC LIMIT 100",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ConversationRecord {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        server_id: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for r in rows {
+                out.push(r.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn get_conversation(&self, id: &str) -> Result<Option<ConversationRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, server_id, created_at, updated_at FROM conversations WHERE id = ?1",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut rows = stmt
+            .query_map(params![id], |row| {
+                Ok(ConversationRecord {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    server_id: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        if let Some(r) = rows.next() {
+            Ok(Some(r.map_err(|e| AppError::Database(e.to_string()))?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn delete_conversation(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn save_message(&self, msg: &MessageRecord) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, tool_call_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+                content = excluded.content,
+                tool_calls_json = excluded.tool_calls_json",
+            params![
+                msg.id,
+                msg.conversation_id,
+                msg.role,
+                msg.content,
+                msg.tool_calls_json,
+                msg.tool_call_id,
+                msg.created_at,
+            ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_messages(&self, conversation_id: &str) -> Result<Vec<MessageRecord>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, created_at
+                 FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![conversation_id], |row| {
+                Ok(MessageRecord {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    tool_calls_json: row.get(4)?,
+                    tool_call_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| AppError::Database(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
     pub fn vacuum_database(&self) -> Result<DatabaseVacuumResult, AppError> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("VACUUM; PRAGMA optimize;")?;
@@ -1075,5 +1232,81 @@ mod tests {
         let vacuum = db.vacuum_database().expect("Vacuum should succeed");
         assert!(vacuum.success);
         assert!(vacuum.message.contains("successfully vacuumed"));
+    }
+
+    #[test]
+    fn test_conversation_and_messages_persistence() {
+        let db = Database::in_memory().unwrap();
+
+        let srv = ServerRecord {
+            id: "srv-001".into(),
+            name: "prod-web-01".into(),
+            hostname: "192.168.1.50".into(),
+            port: 22,
+            username: "root".into(),
+            environment: "PRODUCTION".into(),
+            auth_method: "SSH_KEY".into(),
+            credential_ref: None,
+            ssh_key_path: None,
+            ssh_config_alias: None,
+            cpanel_enabled: false,
+            whm_port: None,
+            whm_token_ref: None,
+            tags_json: "[]".into(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+        db.save_server(&srv).unwrap();
+
+        let conv = ConversationRecord {
+            id: "conv-100".into(),
+            title: "Check WHM Security Advisor".into(),
+            server_id: Some("srv-001".into()),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        db.save_conversation(&conv).expect("Should save conversation");
+
+        let list = db.list_conversations(None).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "Check WHM Security Advisor");
+
+        let fetched = db.get_conversation("conv-100").unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().id, "conv-100");
+
+        let msg1 = MessageRecord {
+            id: "msg-1".into(),
+            conversation_id: "conv-100".into(),
+            role: "user".into(),
+            content: "Check KernelCare updates".into(),
+            tool_calls_json: None,
+            tool_call_id: None,
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        let msg2 = MessageRecord {
+            id: "msg-2".into(),
+            conversation_id: "conv-100".into(),
+            role: "assistant".into(),
+            content: "KernelCare update is available.".into(),
+            tool_calls_json: Some(r#"[{"name":"cpanel.security_advisor"}]"#.into()),
+            tool_call_id: None,
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        db.save_message(&msg1).unwrap();
+        db.save_message(&msg2).unwrap();
+
+        let messages = db.list_messages("conv-100").unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].role, "assistant");
+
+        // Delete conversation cascades to messages
+        db.delete_conversation("conv-100").unwrap();
+        assert!(db.list_conversations(None).unwrap().is_empty());
+        assert!(db.list_messages("conv-100").unwrap().is_empty());
     }
 }

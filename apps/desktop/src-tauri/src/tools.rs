@@ -43,7 +43,18 @@ impl ToolInputSchema {
             additional_properties: Some(false),
         }
     }
+}
 
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    if path.starts_with("~/") || path.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(&path[2..]);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
+impl ToolInputSchema {
     /// Validate JSON arguments against this schema
     pub fn validate(&self, args: &serde_json::Value) -> Result<(), String> {
         let obj = match args {
@@ -2243,7 +2254,18 @@ impl ToolRegistry {
                         .arg("-o")
                         .arg("ConnectTimeout=10")
                         .arg("-p")
-                        .arg(srv.port.to_string())
+                        .arg(srv.port.to_string());
+
+                    if let Some(ref key_path) = srv.ssh_key_path {
+                        if !key_path.trim().is_empty() {
+                            let expanded = expand_tilde(key_path);
+                            if expanded.exists() {
+                                ssh_cmd.arg("-i").arg(expanded);
+                            }
+                        }
+                    }
+
+                    ssh_cmd
                         .arg(format!("{}@{}", srv.username, target_host))
                         .arg(&full_remote_cmd);
 
@@ -3104,7 +3126,18 @@ fn execute_semantic_server_tool(
         .arg("-o")
         .arg("ConnectTimeout=10")
         .arg("-p")
-        .arg(srv.port.to_string())
+        .arg(srv.port.to_string());
+
+    if let Some(ref key_path) = srv.ssh_key_path {
+        if !key_path.trim().is_empty() {
+            let expanded = expand_tilde(key_path);
+            if expanded.exists() {
+                ssh_cmd.arg("-i").arg(expanded);
+            }
+        }
+    }
+
+    ssh_cmd
         .arg(format!("{}@{}", srv.username, target_host))
         .arg(&remote_cmd);
 
@@ -3324,7 +3357,18 @@ fn execute_cpanel_tool(
         .arg("-o")
         .arg("ConnectTimeout=10")
         .arg("-p")
-        .arg(srv.port.to_string())
+        .arg(srv.port.to_string());
+
+    if let Some(ref key_path) = srv.ssh_key_path {
+        if !key_path.trim().is_empty() {
+            let expanded = expand_tilde(key_path);
+            if expanded.exists() {
+                ssh_cmd.arg("-i").arg(expanded);
+            }
+        }
+    }
+
+    ssh_cmd
         .arg(format!("{}@{}", srv.username, target_host))
         .arg(&remote_cmd);
 

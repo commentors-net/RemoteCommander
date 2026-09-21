@@ -6,8 +6,8 @@ use crate::approval::{ApprovalManager, ApprovalRequest, ApprovalSubmission, Tool
 use crate::database::Database;
 use crate::error::AppError;
 use crate::models::{
-    AppInfo, AuditEventRecord, ConnectionTestResult, DiscoveredSshHost, HostKeyInfo,
-    KnownHostRecord, ServerRecord, SettingRecord, ToolCallRecord,
+    AppInfo, AuditEventRecord, ConnectionTestResult, ConversationRecord, DiscoveredSshHost,
+    HostKeyInfo, KnownHostRecord, MessageRecord, ServerRecord, SettingRecord, ToolCallRecord,
 };
 use crate::multi_server::{
     self, BatchPolicyEvaluation, MultiServerAggregateResult, MultiServerDiagnosticsMatrixRequest,
@@ -1037,3 +1037,89 @@ pub fn vacuum_database(
 ) -> Result<crate::database::DatabaseVacuumResult, AppError> {
     db.vacuum_database()
 }
+
+// Conversation History & Session Management Handlers
+
+#[tauri::command]
+pub fn save_conversation(
+    db: State<'_, Database>,
+    conversation: ConversationRecord,
+) -> Result<(), AppError> {
+    db.save_conversation(&conversation)
+}
+
+#[tauri::command]
+pub fn list_conversations(
+    db: State<'_, Database>,
+    server_id: Option<String>,
+) -> Result<Vec<ConversationRecord>, AppError> {
+    db.list_conversations(server_id.as_deref())
+}
+
+#[tauri::command]
+pub fn get_conversation(
+    db: State<'_, Database>,
+    id: String,
+) -> Result<Option<ConversationRecord>, AppError> {
+    db.get_conversation(&id)
+}
+
+#[tauri::command]
+pub fn delete_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    db.delete_conversation(&id)
+}
+
+#[tauri::command]
+pub fn save_message(db: State<'_, Database>, message: MessageRecord) -> Result<(), AppError> {
+    db.save_message(&message)
+}
+
+#[tauri::command]
+pub fn list_messages(
+    db: State<'_, Database>,
+    conversation_id: String,
+) -> Result<Vec<MessageRecord>, AppError> {
+    db.list_messages(&conversation_id)
+}
+
+#[tauri::command]
+pub fn write_app_log(
+    db: State<'_, Database>,
+    level: String,
+    category: String,
+    message: String,
+    details_json: Option<String>,
+) -> Result<(), AppError> {
+    crate::logging::append_log(&level, &category, &message);
+    if level.eq_ignore_ascii_case("error") || level.eq_ignore_ascii_case("warn") {
+        let event = AuditEventRecord {
+            id: format!("log-{}", uuid::Uuid::new_v4()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            event_type: format!("{}_{}", category.to_uppercase(), level.to_uppercase()),
+            server_id: None,
+            tool_name: None,
+            details_json: details_json.unwrap_or_else(|| {
+                serde_json::json!({
+                    "message": message,
+                    "level": level,
+                    "category": category,
+                })
+                .to_string()
+            }),
+        };
+        let _ = db.record_audit_event(&event);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_app_log_info() -> Result<serde_json::Value, AppError> {
+    let path = crate::logging::get_log_file_path();
+    let recent = crate::logging::read_recent_logs(100);
+    Ok(serde_json::json!({
+        "logFilePath": path.to_string_lossy().to_string(),
+        "recentLines": recent,
+    }))
+}
+
+

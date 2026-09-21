@@ -18,7 +18,7 @@ import { ChatMessage } from './messages.js';
  * matching ^[a-zA-Z0-9_-]+$.
  */
 export function sanitizeToolName(name: string): string {
-  return name.replace(/\./g, '__');
+  return name.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 /**
@@ -48,6 +48,7 @@ export interface ChatRequest {
 
 export type ChatStreamChunk =
   | { type: 'TEXT_DELTA'; delta: string }
+  | { type: 'THOUGHT_DELTA'; thought: string }
   | {
       type: 'TOOL_CALL_DELTA';
       callId: string;

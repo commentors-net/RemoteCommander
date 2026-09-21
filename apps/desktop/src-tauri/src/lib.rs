@@ -189,6 +189,14 @@ pub fn run() {
             commands::get_alpha_readiness_report,
             commands::check_database_integrity,
             commands::vacuum_database,
+            commands::save_conversation,
+            commands::list_conversations,
+            commands::get_conversation,
+            commands::delete_conversation,
+            commands::save_message,
+            commands::list_messages,
+            commands::write_app_log,
+            commands::get_app_log_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RemoteCommander desktop application");

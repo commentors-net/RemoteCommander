@@ -189,6 +189,24 @@ export interface SettingRecord {
   updated_at: string;
 }
 
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  serverId?: string | null | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageRecord {
+  id: string;
+  conversationId: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCallsJson?: string | null | undefined;
+  toolCallId?: string | null | undefined;
+  createdAt: string;
+}
+
 export interface ApprovalRequest {
   id: string;
   tool_call_id: string;
@@ -738,6 +756,9 @@ const mockServers: ServerProfile[] = [
     updatedAt: new Date().toISOString(),
   },
 ];
+
+const mockConversations: ConversationRecord[] = [];
+const mockMessages: MessageRecord[] = [];
 
 const mockAuditEvents: AuditEvent[] = [
   {
@@ -2298,7 +2319,34 @@ export const Bridge = {
 
   async testServerConnection(serverId: string): Promise<ConnectionTestResult> {
     try {
-      return await invokeTauri<ConnectionTestResult>('test_server_connection', { serverId });
+      const raw = await invokeTauri<any>('test_server_connection', { serverId });
+      const hostKeyRaw = raw.hostKey ?? raw.host_key;
+      const hostKey = hostKeyRaw
+        ? {
+            keyType: hostKeyRaw.keyType ?? hostKeyRaw.key_type ?? '',
+            publicKeyBase64: hostKeyRaw.publicKeyBase64 ?? hostKeyRaw.public_key_base64 ?? '',
+            fingerprintSha256: hostKeyRaw.fingerprintSha256 ?? hostKeyRaw.fingerprint_sha256 ?? '',
+          }
+        : undefined;
+
+      const hostKeyStatus =
+        raw.hostKeyStatus ?? raw.host_key_status ?? (raw.success ? 'TRUSTED' : 'UNVERIFIED');
+
+      return {
+        success: Boolean(raw.success),
+        serverId: raw.serverId ?? raw.server_id ?? serverId,
+        serverName: raw.serverName ?? raw.server_name ?? '',
+        hostname: raw.hostname ?? '',
+        port: raw.port ?? 22,
+        username: raw.username ?? '',
+        hostKey,
+        hostKeyStatus,
+        previousFingerprint: raw.previousFingerprint ?? raw.previous_fingerprint,
+        newFingerprint: raw.newFingerprint ?? raw.new_fingerprint,
+        latencyMs: raw.latencyMs ?? raw.latency_ms ?? 0,
+        serverVersionBanner: raw.serverVersionBanner ?? raw.server_version_banner,
+        errorMessage: raw.errorMessage ?? raw.error_message,
+      };
     } catch {
       // Headless / mock test fallback
       const srv = mockServers.find((s) => s.id === serverId);
@@ -2340,7 +2388,17 @@ export const Bridge = {
 
   async acceptServerHostKey(serverId: string, hostKey: HostKeyInfo): Promise<void> {
     try {
-      await invokeTauri<void>('accept_server_host_key', { serverId, hostKey });
+      await invokeTauri<void>('accept_server_host_key', {
+        serverId,
+        hostKey: {
+          key_type: hostKey.keyType ?? (hostKey as any).key_type,
+          public_key_base64: hostKey.publicKeyBase64 ?? (hostKey as any).public_key_base64,
+          fingerprint_sha256: hostKey.fingerprintSha256 ?? (hostKey as any).fingerprint_sha256,
+          keyType: hostKey.keyType,
+          publicKeyBase64: hostKey.publicKeyBase64,
+          fingerprintSha256: hostKey.fingerprintSha256,
+        },
+      });
     } catch {
       // Mock acceptance in headless mode
     }
@@ -4370,5 +4428,103 @@ export const Bridge = {
         databaseService: 'mysql',
       },
     ];
+  },
+
+  async saveConversation(conversation: ConversationRecord): Promise<void> {
+    try {
+      await invokeTauri<void>('save_conversation', { conversation });
+    } catch {
+      const idx = mockConversations.findIndex((c) => c.id === conversation.id);
+      if (idx >= 0) {
+        mockConversations[idx] = conversation;
+      } else {
+        mockConversations.unshift(conversation);
+      }
+    }
+  },
+
+  async listConversations(serverId?: string): Promise<ConversationRecord[]> {
+    try {
+      return await invokeTauri<ConversationRecord[]>('list_conversations', {
+        serverId: serverId ?? null,
+      });
+    } catch {
+      if (serverId) {
+        return mockConversations.filter((c) => !c.serverId || c.serverId === serverId);
+      }
+      return [...mockConversations];
+    }
+  },
+
+  async getConversation(id: string): Promise<ConversationRecord | null> {
+    try {
+      return await invokeTauri<ConversationRecord | null>('get_conversation', { id });
+    } catch {
+      return mockConversations.find((c) => c.id === id) ?? null;
+    }
+  },
+
+  async deleteConversation(id: string): Promise<void> {
+    try {
+      await invokeTauri<void>('delete_conversation', { id });
+    } catch {
+      const idx = mockConversations.findIndex((c) => c.id === id);
+      if (idx >= 0) mockConversations.splice(idx, 1);
+      const filtered = mockMessages.filter((m) => m.conversationId !== id);
+      mockMessages.length = 0;
+      mockMessages.push(...filtered);
+    }
+  },
+
+  async saveMessage(message: MessageRecord): Promise<void> {
+    try {
+      await invokeTauri<void>('save_message', { message });
+    } catch {
+      const idx = mockMessages.findIndex((m) => m.id === message.id);
+      if (idx >= 0) {
+        mockMessages[idx] = message;
+      } else {
+        mockMessages.push(message);
+      }
+    }
+  },
+
+  async listMessages(conversationId: string): Promise<MessageRecord[]> {
+    try {
+      return await invokeTauri<MessageRecord[]>('list_messages', { conversationId });
+    } catch {
+      return mockMessages.filter((m) => m.conversationId === conversationId);
+    }
+  },
+
+  async writeLog(
+    level: 'info' | 'warn' | 'error',
+    category: string,
+    message: string,
+    detailsJson?: string,
+  ): Promise<void> {
+    try {
+      await invokeTauri<void>('write_app_log', {
+        level,
+        category,
+        message,
+        detailsJson: detailsJson ?? null,
+      });
+    } catch {
+      console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](
+        `[${category}] ${message}`,
+      );
+    }
+  },
+
+  async getLogInfo(): Promise<{ logFilePath: string; recentLines: string[] }> {
+    try {
+      return await invokeTauri<{ logFilePath: string; recentLines: string[] }>('get_app_log_info');
+    } catch {
+      return {
+        logFilePath: 'AppData/RemoteCommander/logs/remote_commander.log',
+        recentLines: ['[System] In-memory mock log mode.'],
+      };
+    }
   },
 };

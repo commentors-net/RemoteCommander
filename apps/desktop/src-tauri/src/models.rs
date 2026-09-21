@@ -79,6 +79,7 @@ pub struct ApprovalRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct HostKeyInfo {
     pub key_type: String,
     pub public_key_base64: String,
@@ -103,6 +104,7 @@ pub enum HostKeyStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionTestResult {
     pub success: bool,
     pub server_id: String,
@@ -141,3 +143,26 @@ pub struct KnownHostRecord {
     pub last_verified_at: String,
     pub status: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecord {
+    pub id: String,
+    pub title: String,
+    pub server_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content: String,
+    pub tool_calls_json: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub created_at: String,
+}
+

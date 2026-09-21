@@ -91,6 +91,53 @@ pub fn redact_sensitive_string(input: &str) -> String {
     text
 }
 
+/// Path to persistent on-disk log file in application data directory
+pub fn get_log_file_path() -> std::path::PathBuf {
+    dirs::data_dir()
+        .map(|d| d.join("RemoteCommander").join("logs").join("remote_commander.log"))
+        .unwrap_or_else(|| std::path::PathBuf::from("remote_commander.log"))
+}
+
+/// Append an audit/error/diagnostic log entry to the on-disk log file with automatic secret redaction
+pub fn append_log(level: &str, category: &str, message: &str) {
+    let log_path = get_log_file_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let redacted = redact_sensitive_string(message);
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let line = format!(
+        "[{}] [{}] [{}] {}\n",
+        timestamp,
+        level.to_uppercase(),
+        category,
+        redacted
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        use std::io::Write;
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+/// Read recent lines from the on-disk log file (newest first)
+pub fn read_recent_logs(limit: usize) -> Vec<String> {
+    let log_path = get_log_file_path();
+    if let Ok(content) = std::fs::read_to_string(&log_path) {
+        content
+            .lines()
+            .rev()
+            .take(limit)
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +174,17 @@ mod tests {
 
         let normal = "Server status: OK";
         assert_eq!(redact_sensitive_string(normal), "Server status: OK");
+    }
+
+    #[test]
+    fn test_append_and_read_logs() {
+        append_log("info", "TEST_SUITE", "Test log message without secrets");
+        append_log("error", "TEST_SUITE", "Error with key: sk-proj-12345678901234567890");
+        let logs = read_recent_logs(10);
+        assert!(!logs.is_empty());
+        let joined = logs.join("\n");
+        assert!(joined.contains("TEST_SUITE"));
+        assert!(!joined.contains("sk-proj-12345678901234567890"));
+        assert!(joined.contains("[REDACTED_API_KEY]"));
     }
 }

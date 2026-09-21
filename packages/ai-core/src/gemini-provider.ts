@@ -276,7 +276,9 @@ export class GeminiProvider implements AIProvider {
 
               const parts = candidate.content?.parts ?? [];
               for (const part of parts) {
-                if (part.text) {
+                if (part.thought) {
+                  yield { type: 'THOUGHT_DELTA', thought: part.text };
+                } else if (part.text) {
                   yield { type: 'TEXT_DELTA', delta: part.text };
                 }
                 if (part.functionCall) {

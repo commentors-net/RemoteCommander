@@ -1,5 +1,7 @@
 # RemoteCommander Gitignore
 
+not-checked-in/
+
 # Dependencies
 node_modules/
 .pnp

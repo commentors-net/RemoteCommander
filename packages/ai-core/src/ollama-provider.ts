@@ -261,6 +261,10 @@ export class OllamaProvider implements AIProvider {
           try {
             const data = JSON.parse(trimmed);
 
+            if (data.message?.thinking) {
+              yield { type: 'THOUGHT_DELTA', thought: data.message.thinking };
+            }
+
             if (data.message?.content) {
               yield { type: 'TEXT_DELTA', delta: data.message.content };
             }

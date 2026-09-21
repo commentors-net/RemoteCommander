@@ -38,6 +38,7 @@ export interface OrchestrationStep {
   type:
     | 'AI_THINKING'
     | 'TOOL_REQUESTED'
+    | 'TOOL_EXECUTING'
     | 'POLICY_EVALUATED'
     | 'TOOL_EXECUTED'
     | 'FINAL_ANSWER'
@@ -58,6 +59,7 @@ export type ToolExecutorCallback = (toolCall: ToolCallRequest) => Promise<ToolEx
 
 export interface OrchestrationCallbacks {
   onToken?: (delta: string) => void;
+  onThoughtToken?: (thought: string) => void;
   onToolRequested?: (toolCall: ToolCallRequest) => void;
   onToolExecuted?: (toolCall: ToolCallRequest, output: string) => void;
   onApprovalRequired?: (approval: unknown) => void;
@@ -67,6 +69,7 @@ export interface OrchestrationCallbacks {
 
 export interface OrchestrationResult {
   finalText: string;
+  thoughtProcess?: string | undefined;
   messages: ChatMessage[];
   steps: OrchestrationStep[];
   iterations: number;
@@ -110,6 +113,7 @@ export class ToolLoopOrchestrator {
     const startTime = Date.now();
     let iteration = 0;
     let finalText = '';
+    let accumulatedThoughts = '';
     const providerChain = [this.provider, ...this.fallbackProviders];
     let activeProviderIndex = 0;
 
@@ -127,6 +131,7 @@ export class ToolLoopOrchestrator {
       if (signal?.aborted) {
         return {
           finalText,
+          thoughtProcess: accumulatedThoughts.trim() || undefined,
           messages: workingMessages,
           steps,
           iterations: iteration,
@@ -169,6 +174,7 @@ export class ToolLoopOrchestrator {
             if (signal?.aborted) {
               return {
                 finalText: textChunkBuffer,
+                thoughtProcess: accumulatedThoughts.trim() || undefined,
                 messages: workingMessages,
                 steps,
                 iterations: iteration,
@@ -177,7 +183,10 @@ export class ToolLoopOrchestrator {
               };
             }
 
-            if (chunk.type === 'TEXT_DELTA') {
+            if (chunk.type === 'THOUGHT_DELTA') {
+              accumulatedThoughts += chunk.thought;
+              callbacks.onThoughtToken?.(chunk.thought);
+            } else if (chunk.type === 'TEXT_DELTA') {
               textChunkBuffer += chunk.delta;
               callbacks.onToken?.(chunk.delta);
             } else if (chunk.type === 'TOOL_CALL_DELTA') {
@@ -255,6 +264,7 @@ export class ToolLoopOrchestrator {
 
         return {
           finalText,
+          thoughtProcess: accumulatedThoughts.trim() || undefined,
           messages: workingMessages,
           steps,
           iterations: iteration,
@@ -282,12 +292,26 @@ export class ToolLoopOrchestrator {
         callbacks.onStep?.(stepRequested);
         callbacks.onToolRequested?.(call);
 
+        const stepExecuting: OrchestrationStep = {
+          iteration,
+          type: 'TOOL_EXECUTING',
+          details: {
+            toolName: call.toolName,
+            callId: call.id,
+            arguments: call.argumentsJson,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        steps.push(stepExecuting);
+        callbacks.onStep?.(stepExecuting);
+
         const execRes = await executeTool(call);
 
         if (execRes.requiresApproval) {
           callbacks.onApprovalRequired?.(execRes.approvalRequest);
           return {
             finalText: textChunkBuffer,
+            thoughtProcess: accumulatedThoughts.trim() || undefined,
             messages: workingMessages,
             steps,
             iterations: iteration,
@@ -337,6 +361,7 @@ export class ToolLoopOrchestrator {
 
     return {
       finalText,
+      thoughtProcess: accumulatedThoughts.trim() || undefined,
       messages: workingMessages,
       steps,
       iterations: iteration,

@@ -13,13 +13,23 @@ import {
   RotateCcw,
   ShieldCheck,
   Download,
+  FileText,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 export const ActivityView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'audit' | 'tool_calls' | 'backups'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'tool_calls' | 'backups' | 'system_logs'>(
+    'audit',
+  );
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCallRecord[]>([]);
   const [backups, setBackups] = useState<SafetyBackupRecord[]>([]);
+  const [logInfo, setLogInfo] = useState<{ logFilePath: string; recentLines: string[] }>({
+    logFilePath: '',
+    recentLines: [],
+  });
+  const [copiedLogPath, setCopiedLogPath] = useState(false);
   const [loading, setLoading] = useState(false);
   const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<{ text: string; isError: boolean } | null>(
@@ -29,14 +39,16 @@ export const ActivityView: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [auditData, toolCallData, backupData] = await Promise.all([
+      const [auditData, toolCallData, backupData, logs] = await Promise.all([
         Bridge.listAuditEvents(50),
         Bridge.listToolCalls(50),
         Bridge.safetyListBackups(),
+        Bridge.getLogInfo(),
       ]);
       setEvents(auditData);
       setToolCalls(toolCallData);
       setBackups(backupData);
+      setLogInfo(logs);
     } finally {
       setLoading(false);
     }
@@ -254,6 +266,13 @@ export const ActivityView: React.FC = () => {
         >
           <ShieldCheck size={14} /> Safety & Backups ({backups.length})
         </button>
+        <button
+          className={`btn ${activeTab === 'system_logs' ? 'btn-primary' : ''}`}
+          onClick={() => setActiveTab('system_logs')}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <FileText size={14} /> Error & System Logs ({logInfo.recentLines.length})
+        </button>
       </div>
 
       {restoreMessage && (
@@ -455,6 +474,105 @@ export const ActivityView: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {activeTab === 'system_logs' && (
+        <div>
+          <div
+            style={{
+              padding: '12px 16px',
+              backgroundColor: '#161b22',
+              borderRadius: '6px',
+              border: '1px solid #30363d',
+              marginBottom: '16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#8b949e',
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                }}
+              >
+                On-Disk Log File Location
+              </div>
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  color: '#58a6ff',
+                  marginTop: '4px',
+                }}
+              >
+                {logInfo.logFilePath || 'Loading log path...'}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+              onClick={() => {
+                navigator.clipboard.writeText(logInfo.logFilePath);
+                setCopiedLogPath(true);
+                setTimeout(() => setCopiedLogPath(false), 2000);
+              }}
+            >
+              {copiedLogPath ? <Check size={14} color="#3fb950" /> : <Copy size={14} />}
+              {copiedLogPath ? 'Copied!' : 'Copy Path'}
+            </button>
+          </div>
+
+          <div
+            style={{
+              padding: '12px',
+              backgroundColor: '#0d1117',
+              borderRadius: '6px',
+              border: '1px solid #30363d',
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              maxHeight: '540px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {logInfo.recentLines.length === 0 ? (
+              <div style={{ color: '#8b949e', textAlign: 'center', padding: '24px' }}>
+                No errors or diagnostic logs recorded yet.
+              </div>
+            ) : (
+              logInfo.recentLines.map((line, idx) => {
+                const isError = line.includes('[ERROR]');
+                const isWarn = line.includes('[WARN]');
+                const isInfo = line.includes('[INFO]');
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      marginBottom: '2px',
+                      color: isError
+                        ? '#f85149'
+                        : isWarn
+                          ? '#d29922'
+                          : isInfo
+                            ? '#79c0ff'
+                            : '#c9d1d9',
+                      backgroundColor: isError ? 'rgba(248,81,73,0.08)' : 'transparent',
+                    }}
+                  >
+                    {line}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
     </div>
