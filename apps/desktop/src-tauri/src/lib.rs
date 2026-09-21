@@ -105,6 +105,13 @@ pub fn run() {
     let safety_manager = safety::SafetyManager::new();
 
     tauri::Builder::default()
+        .setup(|app| {
+            use tauri::Manager;
+            for window in app.webview_windows().values() {
+                let _ = window.center();
+            }
+            Ok(())
+        })
         .manage(db)
         .manage(secret_service)
         .manage(tool_registry)

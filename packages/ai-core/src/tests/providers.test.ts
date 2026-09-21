@@ -599,4 +599,68 @@ describe('M13 Multi-Provider AI: Tool Name Schema Sanitization (Regex Invariants
       expect(toolChunk.toolName).toBe('cpanel.security_advisor');
     }
   });
+
+  it('correctly associates OpenAI chunked tool call deltas where subsequent chunks omit callId and function.name', async () => {
+    const provider = new OpenAICompatibleProvider({
+      apiKey: 'test-key',
+    });
+
+    const sseBody = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_chunk_123","type":"function","function":{"name":"ssh__execute","arguments":""}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"command\\":\\""}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"uptime && df -h\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseBody));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    );
+
+    const chunks: ChatStreamChunk[] = [];
+    for await (const chunk of provider.streamChat({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'Check uptime on RNG1' }],
+      tools: [
+        {
+          name: 'ssh.execute',
+          description: 'Execute remote SSH command',
+          category: 'ssh',
+          risk: 'READ_ONLY',
+          timeoutSeconds: 30,
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    })) {
+      chunks.push(chunk);
+    }
+
+    const toolChunks = chunks.filter((c) => c.type === 'TOOL_CALL_DELTA');
+    expect(toolChunks.length).toBe(3);
+
+    // All chunks must retain the canonical callId and toolName
+    for (const tc of toolChunks) {
+      if (tc.type === 'TOOL_CALL_DELTA') {
+        expect(tc.callId).toBe('call_chunk_123');
+        expect(tc.toolName).toBe('ssh.execute');
+      }
+    }
+
+    // Accumulating arguments should yield full JSON
+    const accumulatedArgs = toolChunks
+      .map((tc) => (tc.type === 'TOOL_CALL_DELTA' ? tc.argsDelta : ''))
+      .join('');
+    expect(accumulatedArgs).toBe('{"command":"uptime && df -h"}');
+  });
 });

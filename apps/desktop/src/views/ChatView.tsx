@@ -54,17 +54,17 @@ interface MessageItem {
   thoughtDurationMs?: number | undefined;
   isThinking?: boolean | undefined;
   activitySteps?: ActivityStepItem[] | undefined;
-  toolCall?:
-    | {
-        name: string;
-        output: string;
-        durationMs?: number | undefined;
-        target?: string | undefined;
-        truncated?: boolean | undefined;
-        redactionsCount?: number | undefined;
-        restrictedMode?: boolean | undefined;
-      }
-    | undefined;
+  toolCall?: ToolCallDetailPayload | undefined;
+}
+
+export interface ToolCallDetailPayload {
+  name: string;
+  output: string;
+  durationMs?: number | undefined;
+  target?: string | undefined;
+  truncated?: boolean | undefined;
+  redactionsCount?: number | undefined;
+  restrictedMode?: boolean | undefined;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
@@ -98,6 +98,23 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
   };
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatHistoryRef = useRef<HTMLDivElement | null>(null);
+  const liveStepsRef = useRef<ActivityStepItem[]>([]);
+  const liveThinkingRef = useRef<string>('');
+  const latestToolCallDetailsRef = useRef<ToolCallDetailPayload | undefined>(undefined);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+    } else if (chatHistoryRef.current) {
+      chatHistoryRef.current.scrollTop = chatHistoryRef.current.scrollHeight;
+    }
+  };
+
+  useEffect(() => {
+    scrollToBottom('smooth');
+  }, [messages, pendingApproval]);
 
   const refreshPendingApprovals = async () => {
     try {
@@ -234,6 +251,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
 
     const assistantMsgId = (Date.now() + 1).toString();
     const startTime = Date.now();
+    const initialStep: ActivityStepItem = {
+      id: 'step-init',
+      label: `Analyzing request for ${activeServer?.name ?? 'local workstation'}...`,
+      status: 'running',
+      timestamp: startTime,
+    };
+    liveStepsRef.current = [initialStep];
+    liveThinkingRef.current = '';
+    latestToolCallDetailsRef.current = undefined;
+
     setMessages((prev) => [
       ...prev,
       {
@@ -243,14 +270,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
         isThinking: true,
         thinking: '',
         thoughtDurationMs: 0,
-        activitySteps: [
-          {
-            id: 'step-init',
-            label: `Analyzing request for ${activeServer?.name ?? 'local workstation'}...`,
-            status: 'running',
-            timestamp: startTime,
-          },
-        ],
+        activitySteps: [initialStep],
       },
     ]);
 
@@ -320,12 +340,26 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
         privacySettings: currentPrivacy,
       });
 
-      const chatHistory: ChatMessage[] = messages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.text,
-        }));
+      const systemPrompt: ChatMessage = {
+        role: 'system',
+        content: `You are RemoteCommander, a secure desktop AI operations assistant.
+You have access to policy-governed tools to query and operate on servers and the local workstation.
+Active target server: ${activeServer ? `${activeServer.name} (hostname: ${activeServer.hostname})` : 'Local Workstation'}.
+Guidelines:
+1. When asked to inspect system metrics (e.g. uptime, disk usage, CPU, memory, processes, services, files), select and invoke the relevant tool(s) (such as ssh.execute, server.disk_usage, local.system_info, etc.).
+2. When referencing target server, pass server_id as "${activeServer?.id ?? ''}" or name "${activeServer?.name ?? ''}".
+3. CRITICAL: Once the tool executes, ALWAYS synthesize and present a comprehensive, well-formatted final response directly answering the user's question with the output, metrics, and findings. Never return a blank response or only an acknowledgment.`,
+      };
+
+      const chatHistory: ChatMessage[] = [systemPrompt];
+      for (const m of messages) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          chatHistory.push({
+            role: m.role as 'user' | 'assistant',
+            content: m.text,
+          });
+        }
+      }
       chatHistory.push({ role: 'user', content: userPrompt });
 
       const targetModel =
@@ -366,6 +400,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
               target: targetServerId,
               truncated: outcome.truncated,
             };
+            latestToolCallDetailsRef.current = currentToolCallDetails;
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === assistantMsgId ? { ...msg, toolCall: currentToolCallDetails } : msg,
@@ -393,6 +428,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
         },
         {
           onThoughtToken: (token: string) => {
+            liveThinkingRef.current += token;
             setMessages((prev) =>
               prev.map((msg) => {
                 if (msg.id === assistantMsgId) {
@@ -401,6 +437,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                 return msg;
               }),
             );
+            scrollToBottom('auto');
           },
           onToken: (token: string) => {
             setMessages((prev) =>
@@ -411,6 +448,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                 return msg;
               }),
             );
+            scrollToBottom('auto');
           },
           onStep: (step) => {
             setMessages((prev) =>
@@ -488,6 +526,9 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                       redactionsCount: Number(step.details?.redactionsCount ?? 0),
                     };
                     currentToolCallDetails = details;
+                    latestToolCallDetailsRef.current = details;
+                    liveStepsRef.current = currentSteps;
+                    scrollToBottom('auto');
                     return {
                       ...msg,
                       activitySteps: currentSteps,
@@ -506,6 +547,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                   });
                 }
 
+                liveStepsRef.current = currentSteps;
+                scrollToBottom('auto');
                 return {
                   ...msg,
                   activitySteps: currentSteps,
@@ -518,25 +561,31 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
       );
 
       const durationMs = Date.now() - startTime;
-      const finalText = result.requiresApproval
-        ? `I require your explicit approval to execute this operation.`
-        : result.finalText ||
-          (result.cancelled ? '[Execution cancelled by user]' : 'Operation completed.');
+      const toolDetails = latestToolCallDetailsRef.current as unknown as
+        ToolCallDetailPayload | undefined;
+      let finalText = '';
+      if (result.requiresApproval) {
+        finalText = `I require your explicit approval to execute this operation.`;
+      } else if (result.finalText && result.finalText.trim().length > 0) {
+        finalText = result.finalText.trim();
+      } else if (toolDetails?.output && toolDetails.output.trim().length > 0) {
+        finalText = `Operation completed successfully:\n\n\`\`\`\n${toolDetails.output.trim()}\n\`\`\``;
+      } else if (result.cancelled) {
+        finalText = '[Execution cancelled by user]';
+      } else {
+        finalText = 'Operation completed.';
+      }
 
-      let finalSteps: ActivityStepItem[] = [];
-      let finalThinking = result.thoughtProcess;
+      const finalSteps: ActivityStepItem[] = liveStepsRef.current.map((s) => ({
+        ...s,
+        status: (s.status === 'running' ? 'completed' : s.status) as
+          'completed' | 'failed' | 'running',
+      }));
+      const finalThinking = result.thoughtProcess || liveThinkingRef.current;
 
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id === assistantMsgId) {
-            finalSteps = (msg.activitySteps || []).map((s) => ({
-              ...s,
-              status: (s.status === 'running' ? 'completed' : s.status) as
-                'completed' | 'failed' | 'running',
-            }));
-            if (!finalThinking) {
-              finalThinking = msg.thinking;
-            }
             return {
               ...msg,
               isThinking: false,
@@ -544,7 +593,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
               thinking: finalThinking || '',
               activitySteps: finalSteps,
               text: finalText,
-              toolCall: currentToolCallDetails,
+              toolCall: toolDetails,
             };
           }
           return msg;
@@ -552,7 +601,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
       );
 
       const metadataPayload = {
-        toolCall: currentToolCallDetails,
+        toolCall: toolDetails,
         thinking: finalThinking || undefined,
         thoughtDurationMs: durationMs,
         activitySteps: finalSteps,
@@ -568,18 +617,19 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
       })
         .then(loadConversations)
         .catch(console.error);
+
+      scrollToBottom('smooth');
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const errString = (err as Error)?.message ?? String(err);
-      let failedSteps: ActivityStepItem[] = [];
+      const failedSteps: ActivityStepItem[] = liveStepsRef.current.map((s) => ({
+        ...s,
+        status: (s.status === 'running' ? 'failed' : s.status) as
+          'completed' | 'failed' | 'running',
+      }));
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id === assistantMsgId) {
-            failedSteps = (msg.activitySteps || []).map((s) => ({
-              ...s,
-              status: (s.status === 'running' ? 'failed' : s.status) as
-                'completed' | 'failed' | 'running',
-            }));
             return {
               ...msg,
               isThinking: false,
@@ -592,7 +642,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
         }),
       );
       const metadataPayload = {
-        toolCall: currentToolCallDetails,
+        toolCall: latestToolCallDetailsRef.current,
         thoughtDurationMs: durationMs,
         activitySteps: failedSteps,
       };
@@ -606,6 +656,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
       })
         .then(loadConversations)
         .catch(console.error);
+
+      scrollToBottom('smooth');
 
       Bridge.writeLog(
         'error',
@@ -979,7 +1031,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
           </div>
         </div>
       )}
-      <div className="chat-history">
+      <div className="chat-history" ref={chatHistoryRef}>
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
@@ -1248,7 +1300,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
                     </span>
                   )}
                 </div>
-                <pre style={{ whiteSpace: 'pre-wrap', color: '#c9d1d9', margin: 0 }}>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    color: '#c9d1d9',
+                    margin: 0,
+                    maxWidth: '100%',
+                    overflowX: 'auto',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {m.toolCall.output}
                 </pre>
               </div>
@@ -1394,6 +1455,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ activeServer }) => {
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} style={{ height: '1px', width: '100%', clear: 'both' }} />
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>

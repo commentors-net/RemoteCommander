@@ -254,6 +254,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
+    const activeToolCalls = new Map<number, { id: string; name: string }>();
 
     try {
       while (true) {
@@ -297,11 +298,27 @@ export class OpenAICompatibleProvider implements AIProvider {
               }
 
               if (delta?.tool_calls) {
-                for (const tc of delta.tool_calls) {
+                for (const tc of delta.tool_calls as Array<{
+                  index?: number;
+                  id?: string;
+                  function?: { name?: string; arguments?: string };
+                }>) {
+                  const idx = tc.index ?? 0;
+                  let callInfo = activeToolCalls.get(idx);
+                  if (!callInfo) {
+                    callInfo = { id: tc.id ?? `call_${Date.now()}_${idx}`, name: '' };
+                    activeToolCalls.set(idx, callInfo);
+                  }
+                  if (tc.id) {
+                    callInfo.id = tc.id;
+                  }
+                  if (tc.function?.name) {
+                    callInfo.name = desanitizeToolName(tc.function.name);
+                  }
                   yield {
                     type: 'TOOL_CALL_DELTA',
-                    callId: tc.id ?? '',
-                    toolName: tc.function?.name ? desanitizeToolName(tc.function.name) : undefined,
+                    callId: callInfo.id,
+                    toolName: callInfo.name || undefined,
                     argsDelta: tc.function?.arguments ?? '',
                   };
                 }
