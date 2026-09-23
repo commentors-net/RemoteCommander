@@ -297,6 +297,42 @@ pub fn accept_server_host_key(
 }
 
 #[tauri::command]
+pub fn get_public_key(key_path: Option<String>) -> Result<String, AppError> {
+    let path_str = key_path.unwrap_or_else(|| "~/.ssh/id_ed25519".into());
+    let base_path = if path_str.starts_with("~/") || path_str.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&path_str[2..])
+        } else {
+            std::path::PathBuf::from(&path_str)
+        }
+    } else {
+        std::path::PathBuf::from(&path_str)
+    };
+
+    let candidates = vec![
+        base_path.clone(),
+        std::path::PathBuf::from(format!("{}.pub", base_path.display())),
+        dirs::home_dir().map(|h| h.join(".ssh").join("id_ed25519.pub")).unwrap_or_default(),
+        dirs::home_dir().map(|h| h.join(".ssh").join("id_rsa.pub")).unwrap_or_default(),
+    ];
+
+    for candidate in candidates {
+        if candidate.exists() && candidate.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&candidate) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    Err(AppError::NotFound(
+        "No matching SSH public key found (~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)".into(),
+    ))
+}
+
+#[tauri::command]
 pub fn list_discovered_ssh_config_hosts() -> Vec<DiscoveredSshHost> {
     load_user_ssh_config()
 }

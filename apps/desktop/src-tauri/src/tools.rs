@@ -3348,6 +3348,104 @@ fn execute_cpanel_tool(
         }
     };
 
+    // 1. Direct WHM API 1 Execution over HTTPS (Port 2087) using Native OS Keyring Token
+    if let Some(ref cred_ref) = srv.whm_token_ref {
+        let store = crate::secret::OsKeyringStore::new();
+        use crate::secret::SecretStore;
+        if let Ok(token) = store.get(cred_ref) {
+            let clean_token = token.trim();
+            if !clean_token.is_empty() {
+                let whm_port = srv.whm_port.unwrap_or(2087);
+                let endpoint: Option<String> = match tool_name {
+                    "cpanel.server_info" => Some("/json-api/version?api.version=1".to_string()),
+                    "cpanel.list_accounts" => Some("/json-api/listaccts?api.version=1".to_string()),
+                    "cpanel.account_info" => {
+                        let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+                        Some(format!("/json-api/accountsummary?api.version=1&user={}", user))
+                    }
+                    "cpanel.list_domains" => Some("/json-api/get_domain_info?api.version=1".to_string()),
+                    "cpanel.service_status" => Some("/json-api/servicestatus?api.version=1".to_string()),
+                    "cpanel.restart_service" => {
+                        let raw_svc = arguments.get("service_name").and_then(|s| s.as_str()).unwrap_or("cpanel");
+                        Some(format!("/json-api/restartservice?api.version=1&service={}", raw_svc))
+                    }
+                    "cpanel.ssl_status" => Some("/json-api/installed_hosts?api.version=1".to_string()),
+                    "cpanel.backup_status" => Some("/json-api/backup_config_get?api.version=1".to_string()),
+                    "cpanel.account_disk_usage" => {
+                        let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+                        Some(format!("/json-api/showbw?api.version=1&user={}", user))
+                    }
+                    "cpanel.list_php_versions" => Some("/json-api/php_get_installed_versions?api.version=1".to_string()),
+                    "cpanel.suspend_account" => {
+                        let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+                        let reason = arguments.get("reason").and_then(|r| r.as_str()).unwrap_or("Suspended by operator");
+                        Some(format!("/json-api/suspendacct?api.version=1&user={}&reason={}", user, reason))
+                    }
+                    "cpanel.unsuspend_account" => {
+                        let user = arguments.get("user").and_then(|u| u.as_str()).unwrap_or("");
+                        Some(format!("/json-api/unsuspendacct?api.version=1&user={}", user))
+                    }
+                    "cpanel.security_advisor" => Some("/json-api/securityadvisor_get_advice?api.version=1".to_string()),
+                    _ => None,
+                };
+
+                if let Some(ep) = endpoint {
+                    let url = format!("https://{}:{}{}", target_host, whm_port, ep);
+                    let mut curl_cmd = std::process::Command::new("curl");
+                    curl_cmd
+                        .arg("-k")
+                        .arg("-s")
+                        .arg("--max-time").arg("15")
+                        .arg("-H").arg(format!("Authorization: whm root:{}", clean_token))
+                        .arg(&url);
+
+                    if let Ok(out) = curl_cmd.output() {
+                        let stdout_str = String::from_utf8_lossy(&out.stdout).to_string();
+                        if out.status.success() && !stdout_str.trim().is_empty() {
+                            if let Ok(parsed_json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
+                                let is_api_ok = parsed_json
+                                    .get("metadata")
+                                    .and_then(|m| m.get("result"))
+                                    .map(|r| r == 1 || r == "1")
+                                    .unwrap_or(true);
+
+                                if is_api_ok {
+                                    let duration = start.elapsed().as_millis() as u64;
+                                    let parsed_data = match tool_name {
+                                        "cpanel.server_info" => {
+                                            crate::cpanel::CpanelManager::parse_whmapi1_version(&stdout_str, &srv.hostname)
+                                                .ok()
+                                                .and_then(|i| serde_json::to_value(i).ok())
+                                        }
+                                        "cpanel.list_accounts" => {
+                                            crate::cpanel::CpanelManager::parse_whmapi1_listaccts(&stdout_str)
+                                                .ok()
+                                                .and_then(|a| serde_json::to_value(a).ok())
+                                        }
+                                        _ => Some(parsed_json),
+                                    };
+
+                                    return Ok(ToolResult {
+                                        call_id: request_id.to_string(),
+                                        success: true,
+                                        stdout: Some(stdout_str),
+                                        stderr: None,
+                                        exit_code: Some(0),
+                                        data: parsed_data,
+                                        error: None,
+                                        truncated: Some(false),
+                                        duration_ms: duration,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to SSH execution of whmapi1
     let mut ssh_cmd = std::process::Command::new("ssh");
     ssh_cmd
         .arg("-o")

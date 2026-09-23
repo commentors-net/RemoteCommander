@@ -45,7 +45,7 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdateMode }) => {
   const [provider, setProvider] = useState<AIProviderType>('openai');
-  const [model, setModel] = useState('gpt-4o');
+  const [model, setModel] = useState('gpt-5-mini');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKeyRef, setApiKeyRef] = useState('');
   const [testingConnection, setTestingConnection] = useState(false);
@@ -168,7 +168,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
       const aiConfig = await Bridge.getAIConfig();
       setProvider(aiConfig.provider);
       setModel(
-        aiConfig.model || PROVIDER_CAPABILITIES[aiConfig.provider]?.defaultModel || 'gpt-4o',
+        aiConfig.model || PROVIDER_CAPABILITIES[aiConfig.provider]?.defaultModel || 'gpt-5-mini',
       );
       setBaseUrl(aiConfig.baseUrl || '');
       setApiKeyRef(aiConfig.apiKeySecretRef || '');
@@ -564,7 +564,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ currentMode, onUpdat
                 value={provider}
                 onChange={(e) => handleProviderChange(e.target.value as AIProviderType)}
               >
-                <option value="openai">OpenAI (GPT-4o, o3-mini)</option>
+                <option value="openai">OpenAI (GPT-5 Mini, o3-mini, GPT-4o)</option>
                 <option value="anthropic">Anthropic (Claude 3.5 Sonnet / Haiku)</option>
                 <option value="gemini">Google Gemini (Gemini 2.0 Flash / Pro)</option>
                 <option value="ollama">Ollama (Local Llama 3.1 / Qwen 2.5 Coder)</option>

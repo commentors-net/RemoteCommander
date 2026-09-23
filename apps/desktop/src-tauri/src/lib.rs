@@ -145,6 +145,7 @@ pub fn run() {
             commands::list_tool_calls,
             commands::test_server_connection,
             commands::accept_server_host_key,
+            commands::get_public_key,
             commands::list_discovered_ssh_config_hosts,
             commands::list_known_hosts,
             commands::start_terminal_session,

@@ -33,6 +33,15 @@ pub trait SshTransport: Send + Sync {
 
 pub struct SystemOpenSshTransport;
 
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    if path.starts_with("~/") || path.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(&path[2..]);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
 impl SystemOpenSshTransport {
     pub fn new() -> Self {
         Self
@@ -170,21 +179,74 @@ impl SshTransport for SystemOpenSshTransport {
                     server_version_banner: Some("SSH-2.0-OpenSSH_Ready".into()),
                     error_message: None,
                 }),
-                HostKeyStatus::Trusted => Ok(ConnectionTestResult {
-                    success: true,
-                    server_id: server.id.clone(),
-                    server_name: server.name.clone(),
-                    hostname: target_host,
-                    port,
-                    username: username.clone(),
-                    host_key: Some(host_key),
-                    host_key_status: "TRUSTED".into(),
-                    previous_fingerprint: None,
-                    new_fingerprint: None,
-                    latency_ms,
-                    server_version_banner: Some("SSH-2.0-OpenSSH_Ready".into()),
-                    error_message: None,
-                }),
+                HostKeyStatus::Trusted => {
+                    // Host key is verified and trusted. Now probe user authentication non-interactively.
+                    let mut ssh_test = Command::new("ssh");
+                    ssh_test
+                        .arg("-o")
+                        .arg("BatchMode=yes")
+                        .arg("-o")
+                        .arg("StrictHostKeyChecking=yes")
+                        .arg("-o")
+                        .arg("ConnectTimeout=5")
+                        .arg("-p")
+                        .arg(port.to_string());
+
+                    if let Some(ref key_path) = server.ssh_key_path {
+                        if !key_path.trim().is_empty() {
+                            let expanded = expand_tilde(key_path);
+                            if expanded.exists() {
+                                ssh_test.arg("-i").arg(expanded);
+                            }
+                        }
+                    }
+
+                    ssh_test
+                        .arg(format!("{}@{}", username, target_host))
+                        .arg("true");
+
+                    let (auth_ok, auth_err) = match ssh_test.output().await {
+                        Ok(out) => {
+                            if out.status.success() {
+                                (true, None)
+                            } else {
+                                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                (
+                                    false,
+                                    Some(if stderr.is_empty() {
+                                        format!(
+                                            "SSH login failed with exit code {}",
+                                            out.status.code().unwrap_or(-1)
+                                        )
+                                    } else {
+                                        stderr
+                                    }),
+                                )
+                            }
+                        }
+                        Err(e) => (false, Some(format!("Failed to execute ssh: {}", e))),
+                    };
+
+                    Ok(ConnectionTestResult {
+                        success: auth_ok,
+                        server_id: server.id.clone(),
+                        server_name: server.name.clone(),
+                        hostname: target_host,
+                        port,
+                        username: username.clone(),
+                        host_key: Some(host_key),
+                        host_key_status: "TRUSTED".into(),
+                        previous_fingerprint: None,
+                        new_fingerprint: None,
+                        latency_ms,
+                        server_version_banner: Some(if auth_ok {
+                            "SSH-2.0-Authenticated".into()
+                        } else {
+                            "SSH-2.0-HostKeyOnly".into()
+                        }),
+                        error_message: auth_err,
+                    })
+                }
                 HostKeyStatus::Revoked => Ok(ConnectionTestResult {
                     success: false,
                     server_id: server.id.clone(),

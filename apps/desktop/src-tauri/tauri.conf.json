@@ -45,7 +45,7 @@
       "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["en-US"]
+        "languages": ["English"]
       }
     },
     "macOS": {

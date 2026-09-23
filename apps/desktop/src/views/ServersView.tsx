@@ -27,6 +27,7 @@ import {
   DiagnosticType,
   DiagnosticsMatrixRow,
   MultiServerDiagnosticsMatrixResult,
+  CredentialReference,
 } from '@remote-commander/shared-types';
 import { Bridge } from '../bridge.js';
 import {
@@ -51,6 +52,9 @@ import {
   Layers,
   Server,
   Filter,
+  Edit3,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 function formatBytes(bytes: number): string {
@@ -90,6 +94,24 @@ export const ServersView: React.FC<ServersViewProps> = ({
   const [serverPassword, setServerPassword] = useState('');
   const [whmToken, setWhmToken] = useState('');
   const [isSavingServer, setIsSavingServer] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
+  const [localPublicKey, setLocalPublicKey] = useState<string>('');
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [whmCredentialRefs, setWhmCredentialRefs] = useState<CredentialReference[]>([]);
+  const [selectedWhmTokenRef, setSelectedWhmTokenRef] = useState<string>('');
+
+  React.useEffect(() => {
+    Bridge.getPublicKey(sshKeyPath).then((key) => {
+      if (key) setLocalPublicKey(key);
+    });
+  }, [sshKeyPath]);
+
+  React.useEffect(() => {
+    Bridge.listCredentialRefs().then((refs) => {
+      const whmRefs = refs.filter((r) => r.type === 'WHM_API_TOKEN');
+      setWhmCredentialRefs(whmRefs);
+    });
+  }, []);
 
   // Connection Test & Verification State
   const [testResults, setTestResults] = useState<
@@ -532,6 +554,39 @@ export const ServersView: React.FC<ServersViewProps> = ({
     }
   };
 
+  const handleEditServer = (s: ServerProfile) => {
+    setEditingServerId(s.id);
+    setName(s.name);
+    setHostname(s.hostname);
+    setPort(s.port);
+    setUsername(s.username);
+    setEnvironment(s.environment);
+    setSshConfigAlias(s.sshConfigAlias || '');
+    setCpanelEnabled(s.cpanelEnabled || false);
+    setAuthMethod(s.authMethod);
+    setSshKeyPath(s.sshKeyPath || '~/.ssh/id_ed25519');
+    setServerPassword('');
+    setWhmToken('');
+    setSelectedWhmTokenRef(s.whmTokenRef || '');
+    setShowAdd(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingServerId(null);
+    setName('');
+    setHostname('');
+    setPort(22);
+    setUsername('root');
+    setSshConfigAlias('');
+    setAuthMethod('SSH_KEY');
+    setSshKeyPath('~/.ssh/id_ed25519');
+    setServerPassword('');
+    setWhmToken('');
+    setSelectedWhmTokenRef('');
+    setShowAdd(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !hostname) return;
@@ -552,7 +607,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
         }
       }
 
-      let whmTokenRef: string | undefined = undefined;
+      let whmTokenRef: string | undefined = selectedWhmTokenRef.trim() || undefined;
       if (cpanelEnabled && whmToken.trim()) {
         try {
           const token = await Bridge.saveSecret(
@@ -566,8 +621,9 @@ export const ServersView: React.FC<ServersViewProps> = ({
         }
       }
 
+      const existing = editingServerId ? servers.find((s) => s.id === editingServerId) : null;
       const newServer: ServerProfile = {
-        id: `srv-${Date.now()}`,
+        id: editingServerId || `srv-${Date.now()}`,
         name,
         hostname,
         port,
@@ -575,28 +631,23 @@ export const ServersView: React.FC<ServersViewProps> = ({
         environment,
         authMethod,
         credentialRef:
-          credentialRef || (authMethod === 'PASSWORD' ? `vault:ssh:${name}` : undefined),
-        sshKeyPath: authMethod === 'SSH_KEY' ? sshKeyPath.trim() || '~/.ssh/id_ed25519' : undefined,
+          credentialRef ||
+          (authMethod === 'PASSWORD'
+            ? existing?.credentialRef || `vault:ssh:${name}`
+            : undefined),
+        sshKeyPath:
+          authMethod === 'SSH_KEY' ? sshKeyPath.trim() || '~/.ssh/id_ed25519' : undefined,
         sshConfigAlias: sshConfigAlias.trim() || undefined,
         cpanelEnabled,
         whmPort: cpanelEnabled ? 2087 : undefined,
-        whmTokenRef,
+        whmTokenRef: whmTokenRef || existing?.whmTokenRef,
         tags: [environment.toLowerCase(), cpanelEnabled ? 'cpanel' : 'standard'],
-        createdAt: new Date().toISOString(),
+        createdAt: existing?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       onAddServer(newServer);
-      setName('');
-      setHostname('');
-      setPort(22);
-      setUsername('root');
-      setSshConfigAlias('');
-      setAuthMethod('SSH_KEY');
-      setSshKeyPath('~/.ssh/id_ed25519');
-      setServerPassword('');
-      setWhmToken('');
-      setShowAdd(false);
+      handleCancelEdit();
     } finally {
       setIsSavingServer(false);
     }
@@ -732,7 +783,9 @@ export const ServersView: React.FC<ServersViewProps> = ({
       {/* Add Server Form */}
       {showAdd && (
         <div className="panel-card" style={{ marginBottom: '20px' }}>
-          <h3 style={{ marginBottom: '16px' }}>Add Target Server Profile</h3>
+          <h3 style={{ marginBottom: '16px' }}>
+            {editingServerId ? `Edit Server Profile: ${name}` : 'Add Target Server Profile'}
+          </h3>
           <form
             onSubmit={handleSubmit}
             style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}
@@ -873,11 +926,70 @@ export const ServersView: React.FC<ServersViewProps> = ({
                       value={sshKeyPath}
                       onChange={(e) => setSshKeyPath(e.target.value)}
                     />
-                    <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '4px' }}>
-                      OpenSSH uses this key. Ensure your matching public key (e.g.{' '}
-                      <code>id_ed25519.pub</code>) is in <code>/root/.ssh/authorized_keys</code> on
-                      the server.
-                    </div>
+                    {localPublicKey ? (
+                      <div
+                        style={{
+                          marginTop: '8px',
+                          padding: '8px 10px',
+                          backgroundColor: '#161b22',
+                          borderRadius: '6px',
+                          border: '1px solid #30363d',
+                          fontSize: '11px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '4px',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, color: '#58a6ff' }}>
+                            Matching Local Public Key
+                          </span>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '11px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            onClick={() => {
+                              navigator.clipboard.writeText(localPublicKey);
+                              setCopiedKey(true);
+                              setTimeout(() => setCopiedKey(false), 2000);
+                            }}
+                          >
+                            {copiedKey ? <Check size={12} color="#3fb950" /> : <Copy size={12} />}
+                            {copiedKey ? 'Copied!' : 'Copy Key'}
+                          </button>
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: 'monospace',
+                            color: '#8b949e',
+                            wordBreak: 'break-all',
+                            maxHeight: '48px',
+                            overflowY: 'auto',
+                          }}
+                        >
+                          {localPublicKey}
+                        </div>
+                        <div style={{ marginTop: '4px', color: '#7ee787', fontSize: '10px' }}>
+                          Add this public key to <code>/root/.ssh/authorized_keys</code> on your server (or in WHM &rarr; Security Center &rarr; Manage root's SSH Keys).
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '4px' }}>
+                        OpenSSH uses this key. Ensure your matching public key (e.g.{' '}
+                        <code>id_ed25519.pub</code>) is in <code>/root/.ssh/authorized_keys</code> on
+                        the server.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -946,28 +1058,52 @@ export const ServersView: React.FC<ServersViewProps> = ({
                     fontWeight: 600,
                   }}
                 >
-                  WHM API Token (Optional)
+                  WHM API Token (Native OS Keyring)
                 </label>
+                {whmCredentialRefs.length > 0 && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <select
+                      className="chat-input"
+                      style={{ width: '100%', height: '42px' }}
+                      value={selectedWhmTokenRef}
+                      onChange={(e) => setSelectedWhmTokenRef(e.target.value)}
+                    >
+                      <option value="">-- Select saved token from OS Keyring --</option>
+                      {whmCredentialRefs.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label} ({r.id.slice(0, 32)}...)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <input
                   type="password"
                   className="chat-input"
                   style={{ width: '100%' }}
-                  placeholder="Paste WHM API token generated in WHM > Manage API Tokens"
+                  placeholder={
+                    selectedWhmTokenRef
+                      ? 'Using selected Keyring token (or paste new token to override)'
+                      : 'Paste WHM API token generated in WHM > Manage API Tokens'
+                  }
                   value={whmToken}
                   onChange={(e) => setWhmToken(e.target.value)}
                 />
                 <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '4px' }}>
-                  Used for direct WHM API 1 port 2087 operations. If left blank, root SSH is used to
-                  execute <code>whmapi1</code> and security advisor scripts.
+                  Used for direct WHM API 1 port 2087 operations over HTTPS. When linked to your OS Keyring token, WHM queries execute directly without needing SSH.
                 </div>
               </div>
             )}
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
               <button type="submit" className="btn btn-primary" disabled={isSavingServer}>
-                {isSavingServer ? 'Saving Server...' : 'Save Server Profile'}
+                {isSavingServer
+                  ? 'Saving Server...'
+                  : editingServerId
+                    ? 'Update Server Profile'
+                    : 'Save Server Profile'}
               </button>
-              <button type="button" className="btn" onClick={() => setShowAdd(false)}>
+              <button type="button" className="btn" onClick={handleCancelEdit}>
                 Cancel
               </button>
             </div>
@@ -1198,7 +1334,43 @@ export const ServersView: React.FC<ServersViewProps> = ({
                       </span>
                     ) : test?.result ? (
                       <div>
-                        {test.result.hostKeyStatus === 'TRUSTED' && (
+                        {test.result.hostKeyStatus === 'TRUSTED' && test.result.errorMessage && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '2px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                color: '#d29922',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                              }}
+                              title="Host key is trusted, but SSH user login authentication failed"
+                            >
+                              <ShieldCheck size={14} /> Host Verified (Auth Failed)
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '10px',
+                                color: '#f85149',
+                                maxWidth: '180px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={test.result.errorMessage}
+                            >
+                              {test.result.errorMessage}
+                            </div>
+                          </div>
+                        )}
+                        {test.result.hostKeyStatus === 'TRUSTED' && !test.result.errorMessage && (
                           <div
                             style={{
                               display: 'flex',
@@ -1209,7 +1381,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                             }}
                             title={`Fingerprint: ${test.result.hostKey?.fingerprintSha256 ?? 'Verified'}`}
                           >
-                            <ShieldCheck size={14} /> Connected ({test.result.latencyMs}ms)
+                            <ShieldCheck size={14} /> Connected & Authenticated ({test.result.latencyMs}ms)
                           </div>
                         )}
                         {test.result.hostKeyStatus === 'NEW_HOST' && (
@@ -1361,6 +1533,20 @@ export const ServersView: React.FC<ServersViewProps> = ({
                         <Globe size={13} color="#d2a8ff" /> cPanel
                       </button>
                     )}
+                    <button
+                      className="btn"
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                      onClick={() => handleEditServer(s)}
+                      title="Edit Server Profile"
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
                     <button
                       className="btn"
                       style={{

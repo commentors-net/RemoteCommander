@@ -23,8 +23,8 @@ export const PROVIDER_CAPABILITIES: Record<AIProviderType, AIProviderCapabilitie
     supportsStreaming: true,
     requiresApiKey: true,
     defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o',
-    supportedModels: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+    defaultModel: 'gpt-5-mini',
+    supportedModels: ['gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o3-mini'],
   },
   anthropic: {
     provider: 'anthropic',

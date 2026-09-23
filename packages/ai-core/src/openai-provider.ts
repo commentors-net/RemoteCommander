@@ -34,13 +34,21 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.apiKey = options.apiKey;
     this.customModels = options.customModels ?? [
       {
+        id: 'gpt-5-mini',
+        name: 'GPT-5 Mini',
+        provider: 'openai',
+        contextWindow: 128_000,
+        supportsTools: true,
+        supportsStreaming: true,
+        isDefault: true,
+      },
+      {
         id: 'gpt-4o',
         name: 'GPT-4o',
         provider: 'openai',
         contextWindow: 128_000,
         supportsTools: true,
         supportsStreaming: true,
-        isDefault: true,
       },
       {
         id: 'gpt-4o-mini',

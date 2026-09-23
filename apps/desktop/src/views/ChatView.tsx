@@ -365,7 +365,7 @@ Guidelines:
       const targetModel =
         currentConfig.model ||
         PROVIDER_CAPABILITIES[currentConfig.provider]?.defaultModel ||
-        'gpt-4o';
+        'gpt-5-mini';
 
       const result = await orchestrator.run(
         chatHistory,
@@ -800,7 +800,7 @@ Guidelines:
               <strong style={{ color: '#c9d1d9', textTransform: 'capitalize' }}>
                 {aiConfig?.provider ?? 'OpenAI'}
               </strong>{' '}
-              <span style={{ color: '#8b949e' }}>({aiConfig?.model ?? 'gpt-4o'})</span>
+              <span style={{ color: '#8b949e' }}>({aiConfig?.model ?? 'gpt-5-mini'})</span>
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

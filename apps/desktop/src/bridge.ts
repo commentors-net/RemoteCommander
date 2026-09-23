@@ -344,7 +344,7 @@ const mockSettings = new Map<string, string>([
   ['permission_mode', '"SAFE_AUTOMATION"'],
   ['theme', '"dark"'],
   ['ai_provider', '"openai"'],
-  ['ai_model', '"gpt-4o"'],
+  ['ai_model', '"gpt-5-mini"'],
   ['ai_base_url', '""'],
   ['ai_api_key_ref', '""'],
   ['ssh_host_key_checking', 'true'],
@@ -2404,6 +2404,14 @@ export const Bridge = {
     }
   },
 
+  async getPublicKey(keyPath?: string): Promise<string> {
+    try {
+      return await invokeTauri<string>('get_public_key', { keyPath });
+    } catch {
+      return '';
+    }
+  },
+
   async listDiscoveredSshConfigHosts(): Promise<DiscoveredSshHost[]> {
     try {
       return await invokeTauri<DiscoveredSshHost[]>('list_discovered_ssh_config_hosts');
@@ -3938,7 +3946,7 @@ export const Bridge = {
 
   async getAIConfig(): Promise<AIProviderConfig> {
     let provider: AIProviderType = 'openai';
-    let model = 'gpt-4o';
+    let model = 'gpt-5-mini';
     let baseUrl = '';
     let apiKeySecretRef = '';
 
@@ -3959,7 +3967,7 @@ export const Bridge = {
         model = m;
       }
     } else {
-      model = PROVIDER_CAPABILITIES[provider]?.defaultModel ?? 'gpt-4o';
+      model = PROVIDER_CAPABILITIES[provider]?.defaultModel ?? 'gpt-5-mini';
     }
 
     const u = await this.getSetting('ai_base_url');
