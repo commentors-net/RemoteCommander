@@ -24,6 +24,9 @@ build/
 .env.development
 .env.test
 .env.production
+apps/web/data/
+apps/web/deploy/
+*.zip
 *.pem
 *.key
 *.cert

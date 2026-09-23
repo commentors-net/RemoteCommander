@@ -1,0 +1,37 @@
+{
+  "name": "@remote-commander/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json && esbuild src/server/index.ts --bundle --platform=node --format=cjs --external:express --external:cors --external:dotenv --outfile=dist/server/index.cjs",
+    "build": "npm run build:client && npm run build:server",
+    "start": "node dist/server/index.cjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@remote-commander/ai-core": "*",
+    "@remote-commander/shared-types": "*",
+    "@remote-commander/tool-schema": "*",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.5"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src/server",
+    "outDir": "./dist/server",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "references": [
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/tool-schema" },
+    { "path": "../../packages/ai-core" }
+  ],
+  "include": ["src/server/**/*"]
+}
