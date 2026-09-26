@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build:client": "vite build",
-    "build:server": "tsc -p tsconfig.server.json && esbuild src/server/index.ts --bundle --platform=node --format=cjs --external:express --external:cors --external:dotenv --outfile=dist/server/index.cjs",
+    "build:server": "tsc -p tsconfig.server.json && esbuild src/server/index.ts --bundle --platform=node --format=cjs --external:express --external:cors --external:dotenv --external:ssh2 --outfile=dist/server/index.cjs",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist/server/index.cjs",
     "typecheck": "tsc --noEmit",
@@ -16,12 +16,14 @@
     "@remote-commander/ai-core": "*",
     "@remote-commander/shared-types": "*",
     "@remote-commander/tool-schema": "*",
+    "@types/ssh2": "^1.15.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "lucide-react": "^0.475.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

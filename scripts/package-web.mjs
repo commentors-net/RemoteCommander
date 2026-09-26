@@ -45,6 +45,7 @@ const deployPkg = {
     'lucide-react': pkg.dependencies['lucide-react'] || '^0.475.0',
     react: pkg.dependencies.react || '^18.3.1',
     'react-dom': pkg.dependencies['react-dom'] || '^18.3.1',
+    ssh2: pkg.dependencies.ssh2 || '^1.17.0',
   },
 };
 fs.writeFileSync(path.join(outputDir, 'package.json'), JSON.stringify(deployPkg, null, 2));

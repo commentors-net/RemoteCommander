@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { getSystemMetrics, getPm2Status, getProcessList } from './system.js';
 import { listDirectory, readFileContent, writeFileContent, extractArchive } from './files.js';
 import { testWhmConnection, listWhmAccounts, createWhmAccount, getWhmServiceStatus } from './whm.js';
+import { executeSshCommand, testSshConnection } from './ssh.js';
 
 export const WEB_TOOLS: ToolDefinition[] = [
   {
@@ -149,6 +150,29 @@ export const WEB_TOOLS: ToolDefinition[] = [
     timeoutSeconds: 30,
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'server.ssh_execute',
+    description: 'Execute a bash/shell command on the hosting server via root SSH (e.g. inspect /etc/apache2 virtual hosts, check system services, run diagnostic commands, reload Apache). Requires SSH key configured in Settings.',
+    category: 'server',
+    risk: 'MEDIUM',
+    timeoutSeconds: 60,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Bash shell command string to execute (e.g. "httpd -S" or "cat /etc/apache2/conf.d/userdata/...")' },
+        workingDirectory: { type: 'string', description: 'Optional directory to cd into before executing' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'server.ssh_status',
+    description: 'Test the root SSH connection to this hosting server and verify terminal access.',
+    category: 'server',
+    risk: 'READ_ONLY',
+    timeoutSeconds: 15,
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 export async function executeWebTool(name: string, args: Record<string, any>): Promise<any> {
@@ -214,6 +238,26 @@ export async function executeWebTool(name: string, args: Record<string, any>): P
 
     case 'cpanel.service_status': {
       const res = await getWhmServiceStatus();
+      return res;
+    }
+
+    case 'server.ssh_execute':
+    case 'ssh.execute': {
+      const { command, workingDirectory, cwd } = args as { command?: string; workingDirectory?: string; cwd?: string };
+      if (!command || !command.trim()) throw new Error('Command is required');
+      if (!config.sshPrivateKey) {
+        throw new Error('SSH Private Key is not configured. Please add your root SSH key in Settings > Local Server SSH Access, and authorize the public key in WHM (Security Center > Manage root\'s SSH Keys).');
+      }
+      const sshOpts: { timeoutSeconds?: number; cwd?: string } = {};
+      const targetCwd = workingDirectory || cwd;
+      if (targetCwd) sshOpts.cwd = targetCwd;
+      const res = await executeSshCommand(command, sshOpts);
+      return res;
+    }
+
+    case 'server.ssh_status':
+    case 'ssh.status': {
+      const res = await testSshConnection();
       return res;
     }
 
@@ -346,11 +390,11 @@ CRITICAL OPERATIONAL RULES:
    - Use website.list_files to list directory contents. Both the website root (${realWebsiteRoot}) and the user home directory (${realHomeDir}) are accessible.
    - Use server.extract_zip to unpack uploaded .zip or .tar.gz archives directly into public_html or a target subfolder!
    - Use website.read_file and website.write_file to inspect and edit website configuration files.
-2. Shell & Bash Execution Boundaries:
-   - You do NOT have an interactive terminal shell or arbitrary bash command runner tool in this web edition.
-   - NEVER hallucinate terminal execution by offering fake approval prompts like "Option A — I check it for you on the server (I will run read-only commands like ls/stat). Reply 'yes' to authorize...". You do not have an 'ls/stat' command runner, so do NOT promise to run commands on authorization.
+2. Shell & SSH Command Execution:
+   - When SSH access is configured in Settings (using root's authorized SSH key in WHM), you have the server.ssh_execute tool to execute bash/shell commands on this hosting server as root!
+   - You can use server.ssh_execute to inspect system virtual hosts, check Apache configuration ("httpd -S", "cat /etc/apache2/conf.d/..."), view system logs, check service status ("systemctl status httpd"), or restart services.
+   - If SSH is NOT configured yet (no SSH private key in Settings), explain to the user that they can configure root SSH access in Settings > Local Server SSH Access, and authorize their public key in WHM (Security Center > Manage root's SSH Keys).
    - If a user asks to install an uploaded zip file, check for the zip with website.list_files and extract it using server.extract_zip!
-   - If a user asks to run an arbitrary custom bash script (.sh), explain that for security, raw bash scripts must be run via cPanel Terminal (cPanel > Advanced > Terminal) or SSH, but you can extract archives, list files, and inspect/edit files directly.
 3. Interactive User Choices & Approvals:
    - Whenever asking the user for confirmation, approval, or choosing between options, ALWAYS format the choices cleanly as bracketed tags so they render as one-click action buttons in the web UI!
    - Examples:
@@ -362,11 +406,11 @@ CRITICAL OPERATIONAL RULES:
      Or for approvals:
      [Yes, proceed] [No, cancel]
    - This allows the user to respond with a single click and minimum typing.
-4. Web Server & URL Routing Boundaries (Apache / Passenger / Nginx):
-   - You CANNOT inspect or read system-level Apache or Passenger configuration files in /etc/apache2/, /etc/httpd/, or /var/cpanel/. These are outside your allowed sandbox roots and require root SSH access. Never call website.read_file on /etc/... paths!
-   - NEVER offer options like "Option A: Inspect Apache/Passenger virtual host (WHM/cPanel)" that imply you can inspect root vhost configs.
-   - For web routing, URL paths (such as "/commander" or subfolders), and Phusion Passenger application directives, the configuration you CAN inspect and manage is located in the account's local .htaccess files (e.g. website.read_file on ".htaccess" or "public_html/.htaccess" or "public_html/commander/.htaccess").
-   - If server-wide Apache/Passenger virtual host changes are required, advise the user to check via WHM or SSH root terminal, but offer to inspect or configure their local .htaccess.
+4. Web Server & URL Routing Configuration (Apache / Passenger / Nginx):
+   - To inspect routing for URLs like "/commander" or subfolders:
+     - If SSH is configured: use server.ssh_execute with commands like "httpd -S" or inspecting vhost files in /etc/apache2/.
+     - Within the account: inspect account-level .htaccess files using website.read_file on ".htaccess" or "public_html/.htaccess" or "public_html/commander/.htaccess".
+     - Never call website.read_file on /etc/... paths (file read tool is restricted to website root and account home). For /etc/... paths, always use server.ssh_execute!
 Be direct, helpful, and take action with your actual tools rather than presenting unnecessary menus of options.`;
 
   const conversation: any[] = [

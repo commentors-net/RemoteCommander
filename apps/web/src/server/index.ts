@@ -9,6 +9,7 @@ import { listDirectory, readFileContent, writeFileContent, deleteFileOrDirectory
 import { testWhmConnection, listWhmAccounts, createWhmAccount, getWhmServiceStatus } from './whm.js';
 import { runWebChat, testOpenAiConnection } from './chat.js';
 import { listChatSessions, getChatSession, saveChatSession, deleteChatSession } from './sessions.js';
+import { testSshConnection, generateSshKeyPair } from './ssh.js';
 
 const app = express();
 
@@ -236,12 +237,31 @@ app.get('/api/settings', requireAuth, (_req: Request, res: Response) => {
       hasOpenaiKey: Boolean(config.openaiApiKey),
       openaiModel: config.openaiModel,
       websiteRoot: config.websiteRoot,
+      sshEnabled: config.sshEnabled,
+      sshHost: config.sshHost,
+      sshPort: config.sshPort,
+      sshUsername: config.sshUsername,
+      hasSshKey: Boolean(config.sshPrivateKey),
     },
   });
 });
 
 app.post('/api/settings', requireAuth, (req: Request, res: Response) => {
-  const { whmHost, whmPort, whmToken, openaiApiKey, openaiModel, websiteRoot } = req.body || {};
+  const {
+    whmHost,
+    whmPort,
+    whmToken,
+    openaiApiKey,
+    openaiModel,
+    websiteRoot,
+    sshEnabled,
+    sshHost,
+    sshPort,
+    sshUsername,
+    sshPrivateKey,
+    sshPassphrase,
+  } = req.body || {};
+
   const updates: Record<string, any> = {};
   if (whmHost !== undefined) updates.whmHost = String(whmHost).trim();
   if (whmPort !== undefined) updates.whmPort = Number.parseInt(String(whmPort), 10) || 2087;
@@ -249,9 +269,35 @@ app.post('/api/settings', requireAuth, (req: Request, res: Response) => {
   if (openaiApiKey !== undefined) updates.openaiApiKey = openaiApiKey;
   if (openaiModel !== undefined) updates.openaiModel = openaiModel;
   if (websiteRoot !== undefined) updates.websiteRoot = websiteRoot;
+  if (sshEnabled !== undefined) updates.sshEnabled = Boolean(sshEnabled);
+  if (sshHost !== undefined) updates.sshHost = String(sshHost).trim();
+  if (sshPort !== undefined) updates.sshPort = Number.parseInt(String(sshPort), 10) || 22;
+  if (sshUsername !== undefined) updates.sshUsername = String(sshUsername).trim();
+  if (sshPrivateKey !== undefined && typeof sshPrivateKey === 'string' && sshPrivateKey.trim()) {
+    updates.sshPrivateKey = sshPrivateKey.trim();
+  }
+  if (sshPassphrase !== undefined) updates.sshPassphrase = String(sshPassphrase).trim();
 
   updateConfig(updates);
   res.json({ success: true, message: 'Settings saved successfully' });
+});
+
+app.post('/api/settings/test-ssh', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const result = await testSshConnection(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/settings/generate-ssh-key', requireAuth, (_req: Request, res: Response) => {
+  try {
+    const keyPair = generateSshKeyPair();
+    res.json({ success: true, ...keyPair });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 7. Static files & SPA Fallback

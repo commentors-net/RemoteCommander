@@ -33,6 +33,12 @@ export interface WebConfig {
   openaiModel: string;
   websiteRoot: string;
   dataDir: string;
+  sshEnabled: boolean;
+  sshHost: string;
+  sshPort: number;
+  sshUsername: string;
+  sshPrivateKey: string;
+  sshPassphrase: string;
 }
 
 const defaultDataDir = path.resolve(process.cwd(), 'data');
@@ -55,6 +61,12 @@ export const config: WebConfig = {
   openaiModel: process.env.OPENAI_MODEL || 'gpt-5-mini',
   websiteRoot: process.env.WEBSITE_ROOT || path.resolve(process.cwd(), 'public_html'),
   dataDir: process.env.DATA_DIR || defaultDataDir,
+  sshEnabled: process.env.SSH_ENABLED === 'true' || false,
+  sshHost: process.env.SSH_HOST || '127.0.0.1',
+  sshPort: Number.parseInt(process.env.SSH_PORT || '22', 10),
+  sshUsername: process.env.SSH_USERNAME || 'root',
+  sshPrivateKey: process.env.SSH_PRIVATE_KEY || '',
+  sshPassphrase: process.env.SSH_PASSPHRASE || '',
 };
 
 const settingsFilePath = path.join(config.dataDir, 'settings.json');
@@ -134,6 +146,12 @@ function saveSettingsToDisk(): void {
     openaiApiKey: encryptSecret(config.openaiApiKey),
     openaiModel: config.openaiModel,
     websiteRoot: config.websiteRoot,
+    sshEnabled: config.sshEnabled,
+    sshHost: config.sshHost,
+    sshPort: config.sshPort,
+    sshUsername: config.sshUsername,
+    sshPrivateKey: encryptSecret(config.sshPrivateKey),
+    sshPassphrase: encryptSecret(config.sshPassphrase),
   };
   fs.writeFileSync(settingsFilePath, JSON.stringify(toSave, null, 2), { mode: 0o600, encoding: 'utf-8' });
   console.log('[Config] Saved persistent settings to settings.json (AES-256 encrypted)');
@@ -162,6 +180,22 @@ export function loadPersistedSettings(): void {
       }
       if (saved.openaiModel !== undefined) config.openaiModel = saved.openaiModel;
       if (saved.websiteRoot !== undefined) config.websiteRoot = saved.websiteRoot;
+      if (saved.sshEnabled !== undefined) config.sshEnabled = Boolean(saved.sshEnabled);
+      if (saved.sshHost !== undefined) config.sshHost = saved.sshHost;
+      if (saved.sshPort !== undefined) config.sshPort = Number.parseInt(String(saved.sshPort), 10);
+      if (saved.sshUsername !== undefined) config.sshUsername = saved.sshUsername;
+      if (saved.sshPrivateKey !== undefined) {
+        if (typeof saved.sshPrivateKey === 'string' && !saved.sshPrivateKey.startsWith(SECRET_PREFIX) && saved.sshPrivateKey.trim()) {
+          needsMigration = true;
+        }
+        config.sshPrivateKey = decryptSecret(saved.sshPrivateKey);
+      }
+      if (saved.sshPassphrase !== undefined) {
+        if (typeof saved.sshPassphrase === 'string' && !saved.sshPassphrase.startsWith(SECRET_PREFIX) && saved.sshPassphrase.trim()) {
+          needsMigration = true;
+        }
+        config.sshPassphrase = decryptSecret(saved.sshPassphrase);
+      }
       console.log('[Config] Loaded persistent settings from settings.json (AES-256 encrypted)');
 
       // If legacy plaintext was detected in settings.json, rewrite immediately with encryption
