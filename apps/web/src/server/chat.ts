@@ -244,10 +244,10 @@ export async function executeWebTool(name: string, args: Record<string, any>): P
     case 'server.ssh_execute':
     case 'ssh.execute': {
       const { command, workingDirectory, cwd } = args as { command?: string; workingDirectory?: string; cwd?: string };
-      if (!command || !command.trim()) throw new Error('Command is required');
-      if (!config.sshPrivateKey) {
-        throw new Error('SSH Private Key is not configured. Please add your root SSH key in Settings > Local Server SSH Access, and authorize the public key in WHM (Security Center > Manage root\'s SSH Keys).');
+      if (!config.sshEnabled || !config.sshPrivateKey) {
+        throw new Error('Local SSH execution is not configured or is disabled. Shell/SSH commands cannot be executed until SSH is enabled in Settings > Local Server SSH Execution and an authorized key is configured.');
       }
+      if (!command || !command.trim()) throw new Error('Command is required');
       const sshOpts: { timeoutSeconds?: number; cwd?: string } = {};
       const targetCwd = workingDirectory || cwd;
       if (targetCwd) sshOpts.cwd = targetCwd;
@@ -391,9 +391,11 @@ CRITICAL OPERATIONAL RULES:
    - Use server.extract_zip to unpack uploaded .zip or .tar.gz archives directly into public_html or a target subfolder!
    - Use website.read_file and website.write_file to inspect and edit website configuration files.
 2. Shell & SSH Command Execution:
-   - When SSH access is configured in Settings (using root's authorized SSH key in WHM), you have the server.ssh_execute tool to execute bash/shell commands on this hosting server as root!
+   - When SSH access is enabled in Settings (using root's authorized SSH key in WHM or a sudo cPanel user), you have the server.ssh_execute tool to execute bash/shell commands on this hosting server!
    - You can use server.ssh_execute to inspect system virtual hosts, check Apache configuration ("httpd -S", "cat /etc/apache2/conf.d/..."), view system logs, check service status ("systemctl status httpd"), or restart services.
-   - If SSH is NOT configured yet (no SSH private key in Settings), explain to the user that they can configure root SSH access in Settings > Local Server SSH Access, and authorize their public key in WHM (Security Center > Manage root's SSH Keys).
+   - If SSH is NOT enabled or keys are not configured:
+     - All other capabilities STILL WORK normally! You have the WHM API token for service status and cPanel accounts (cpanel.service_status, cpanel.list_accounts), website file tools for public_html and account home (website.list_files, website.read_file, website.write_file), server.extract_zip for archive extraction, and server.system_info / server.pm2_status for process monitoring.
+     - If the user asks for shell execution or inspecting files outside the website root when SSH is disabled, explain that WHM API operations and website operations are available, and inform them that SSH execution can be enabled in Settings > Local Server SSH Execution.
    - If a user asks to install an uploaded zip file, check for the zip with website.list_files and extract it using server.extract_zip!
 3. Interactive User Choices & Approvals:
    - Whenever asking the user for confirmation, approval, or choosing between options, ALWAYS format the choices cleanly as bracketed tags so they render as one-click action buttons in the web UI!

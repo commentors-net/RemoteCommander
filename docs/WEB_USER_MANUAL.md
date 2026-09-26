@@ -9,6 +9,7 @@
 1. [System Overview & Architecture](#1-system-overview--architecture)
 2. [Login & Settings Setup](#2-login--settings-setup)
 3. [Local Server SSH Execution (Root & Sudo Setup)](#3-local-server-ssh-execution-root--sudo-setup)
+   - [Is SSH Required? (Fallback to WHM API & Built-In Tools)](#is-ssh-required-fallback-to-whm-api--built-in-tools)
    - [Why Loopback SSH?](#why-loopback-ssh)
    - [Option A: Direct `root` SSH Access (WHM Key Authorization)](#option-a-direct-root-ssh-access-whm-key-authorization)
    - [Option B: cPanel User with `sudo` Access (Recommended Best Practice)](#option-b-cpanel-user-with-sudo-access-recommended-best-practice)
@@ -70,6 +71,36 @@ RemoteCommander Web runs as a secure Node.js daemon (managed by cPanel Passenger
 ---
 
 ## 3. Local Server SSH Execution (Root & Sudo Setup)
+
+### Is SSH Required? (Fallback to WHM API & Built-In Tools)
+
+**No, SSH is completely optional.** 
+
+RemoteCommander is fully functional without any SSH keys configured. The **WHM API Token** and **native Node.js engines** handle core administrative and website operations:
+
+| Feature / Task | How It Works Without SSH | Tool Used |
+|---|---|---|
+| **cPanel / WHM Service Status** | Queries WHM API 1 via HTTPS on loopback port 2087 | `cpanel.service_status` |
+| **List Domains & Hosted Accounts** | Queries WHM API 1 | `cpanel.list_accounts` |
+| **Extracting Zip / Tar Archives** | Extracted natively by Node.js (no bash script needed!) | `server.extract_zip` |
+| **Website File Management** | Reads, writes, lists files in `public_html` & home folder | `website.list_files`, `website.read_file`, `website.write_file` |
+| **Server CPU / RAM / Uptime** | Queries native OS kernel metrics | `server.system_info` |
+| **PM2 Process Health** | Queries Node.js process table | `server.pm2_status` |
+| **Visual Error Diagnosis** | Analyzes uploaded screenshots with Multimodal AI | Multimodal vision engine |
+
+#### What Happens When an SSH Command Is Attempted Without SSH Keys?
+If a task specifically requires low-level terminal execution (e.g. running raw bash commands or inspecting `/etc/apache2/` virtual hosts outside the website root):
+1. The tool returns a clean, non-crashing error badge:
+   ```text
+   Tool: server.ssh_execute (failed)
+   Error: Local SSH execution is not configured or is disabled. Shell/SSH commands cannot be executed until SSH is enabled in Settings > Local Server SSH Execution and an authorized key is configured.
+   ```
+2. The AI assistant immediately explains to the user:
+   - That direct terminal/SSH execution is currently disabled.
+   - What alternatives are available right now (e.g. checking `.htaccess` inside `public_html` or querying WHM API).
+   - How they can enable SSH in **Settings &rarr; Local Server SSH Execution** if they want deep terminal access.
+
+---
 
 ### Why Loopback SSH?
 
@@ -392,3 +423,15 @@ Enable **Local Server SSH Execution** in **Settings**. When local SSH is configu
 
 ### Q: What if I want to customize an option before sending it?
 **A**: Click the small **pencil icon (`✎`)** right next to any option button. This places the option text into your input bar and focuses the cursor, allowing you to edit the path, add flags, or include custom notes before pressing Send.
+
+---
+
+### Q: Will RemoteCommander still work if SSH keys are NOT configured?
+**A**: **Yes, absolutely!** RemoteCommander relies primarily on the **WHM API Token** and the **built-in Node.js engines**. You do not need to configure SSH keys for day-to-day website management, extracting archives, viewing server health, or checking WHM services.
+
+If you or the AI assistant attempt an operation that requires raw shell access (such as reading `/etc/apache2/` configs), the system simply displays:
+```text
+Tool: server.ssh_execute (failed)
+Error: Local SSH execution is not configured or is disabled.
+```
+The AI will gracefully fall back to available tools (like WHM API or website root files) and inform you that SSH can optionally be configured in Settings.
