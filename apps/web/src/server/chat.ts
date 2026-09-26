@@ -1,8 +1,10 @@
+import os from 'node:os';
+import path from 'node:path';
 import { OpenAICompatibleProvider } from '@remote-commander/ai-core';
 import type { ToolDefinition } from '@remote-commander/tool-schema';
 import { config } from './config.js';
 import { getSystemMetrics, getPm2Status, getProcessList } from './system.js';
-import { listDirectory, readFileContent, writeFileContent } from './files.js';
+import { listDirectory, readFileContent, writeFileContent, extractArchive } from './files.js';
 import { testWhmConnection, listWhmAccounts, createWhmAccount, getWhmServiceStatus } from './whm.js';
 
 export const WEB_TOOLS: ToolDefinition[] = [
@@ -21,6 +23,27 @@ export const WEB_TOOLS: ToolDefinition[] = [
     risk: 'READ_ONLY',
     timeoutSeconds: 30,
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'server.extract_zip',
+    description: 'Extract a .zip or .tar.gz archive file directly into the website root or a destination folder.',
+    category: 'server',
+    risk: 'MEDIUM',
+    timeoutSeconds: 60,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        archivePath: {
+          type: 'string',
+          description: 'Path or filename of the zip archive (e.g. "update.zip" or "/home/username/update.zip")',
+        },
+        destination: {
+          type: 'string',
+          description: 'Destination directory to extract into (e.g. "public_html" or relative subfolder). Defaults to website root.',
+        },
+      },
+      required: ['archivePath'],
+    },
   },
   {
     name: 'server.pm2_status',
@@ -58,14 +81,14 @@ export const WEB_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'website.read_file',
-    description: 'Read the contents of a file in the website root.',
+    description: 'Read the contents of a file within the website root or account home directory (e.g. ".htaccess", "index.html", "package.json"). Cannot read system-level directories like /etc/apache2 or /var/cpanel.',
     category: 'server',
     risk: 'READ_ONLY',
     timeoutSeconds: 30,
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Relative path to file (e.g. "index.html" or "config.php")' },
+        path: { type: 'string', description: 'Relative path to file (e.g. ".htaccess", "public_html/index.php")' },
       },
       required: ['path'],
     },
@@ -162,6 +185,15 @@ export async function executeWebTool(name: string, args: Record<string, any>): P
     case 'website.write_file': {
       if (!args.path || args.content === undefined) throw new Error('Path and content are required');
       const res = await writeFileContent(args.path, args.content);
+      return res;
+    }
+
+    case 'server.extract_zip':
+    case 'website.extract_archive':
+    case 'website.extract_zip': {
+      const archive = args.archivePath || args.path || args.file;
+      if (!archive) throw new Error('Archive path is required');
+      const res = await extractArchive(archive, args.destination || args.targetDir || '');
       return res;
     }
 
@@ -286,9 +318,56 @@ export async function runWebChat(
   });
 
   const model = config.openaiModel || 'gpt-5-mini';
-  const systemPrompt = `You are RemoteCommander Web Agent, an autonomous operations AI assistant running directly on this hosting server (${config.websiteRoot}).
-You have direct local tools to inspect system health, check PM2 applications, list running processes, manage website files, and execute WHM/cPanel API operations.
-When asked about system metrics, PM2 status, running processes, or website files, invoke the appropriate tools. Be precise, professional, and helpful.`;
+  const realHomeDir = os.homedir();
+  const realWebsiteRoot = path.resolve(config.websiteRoot);
+  const realAppDir = process.cwd();
+  const serverUsername = path.basename(realHomeDir);
+
+  const systemPrompt = `You are RemoteCommander Web Agent, an autonomous operations AI assistant running directly on this hosting server.
+
+SERVER ENVIRONMENT REALITIES:
+- Account Home Root: ${realHomeDir}
+- Website Document Root: ${realWebsiteRoot}
+- Web App Directory: ${realAppDir}
+- Hosting Account Username: ${serverUsername}
+
+When a user mentions generic paths like "/home/username" or seems confused about directory paths:
+1. Explain clearly that their actual username on this server is "${serverUsername}".
+2. Offer their actual discovered paths as one-click action options:
+   [Use Website Root: ${realWebsiteRoot}]
+   [Use Account Home: ${realHomeDir}]
+   [Use App Folder: ${realAppDir}]
+
+You have direct local tools to inspect system health, check PM2 applications, list running processes, manage website files, extract zip archives, and execute WHM/cPanel API operations.
+When asked about system metrics, PM2 status, running processes, website files, or zip archives, invoke the appropriate tools immediately.
+
+CRITICAL OPERATIONAL RULES:
+1. File & Archive Operations:
+   - Use website.list_files to list directory contents. Both the website root (${realWebsiteRoot}) and the user home directory (${realHomeDir}) are accessible.
+   - Use server.extract_zip to unpack uploaded .zip or .tar.gz archives directly into public_html or a target subfolder!
+   - Use website.read_file and website.write_file to inspect and edit website configuration files.
+2. Shell & Bash Execution Boundaries:
+   - You do NOT have an interactive terminal shell or arbitrary bash command runner tool in this web edition.
+   - NEVER hallucinate terminal execution by offering fake approval prompts like "Option A — I check it for you on the server (I will run read-only commands like ls/stat). Reply 'yes' to authorize...". You do not have an 'ls/stat' command runner, so do NOT promise to run commands on authorization.
+   - If a user asks to install an uploaded zip file, check for the zip with website.list_files and extract it using server.extract_zip!
+   - If a user asks to run an arbitrary custom bash script (.sh), explain that for security, raw bash scripts must be run via cPanel Terminal (cPanel > Advanced > Terminal) or SSH, but you can extract archives, list files, and inspect/edit files directly.
+3. Interactive User Choices & Approvals:
+   - Whenever asking the user for confirmation, approval, or choosing between options, ALWAYS format the choices cleanly as bracketed tags so they render as one-click action buttons in the web UI!
+   - Examples:
+     [Option A: Extract archive into public_html]
+     [Option B: Inspect archive contents first]
+     Or for path selections:
+     [Use Website Root: ${realWebsiteRoot}]
+     [Use Account Home: ${realHomeDir}]
+     Or for approvals:
+     [Yes, proceed] [No, cancel]
+   - This allows the user to respond with a single click and minimum typing.
+4. Web Server & URL Routing Boundaries (Apache / Passenger / Nginx):
+   - You CANNOT inspect or read system-level Apache or Passenger configuration files in /etc/apache2/, /etc/httpd/, or /var/cpanel/. These are outside your allowed sandbox roots and require root SSH access. Never call website.read_file on /etc/... paths!
+   - NEVER offer options like "Option A: Inspect Apache/Passenger virtual host (WHM/cPanel)" that imply you can inspect root vhost configs.
+   - For web routing, URL paths (such as "/commander" or subfolders), and Phusion Passenger application directives, the configuration you CAN inspect and manage is located in the account's local .htaccess files (e.g. website.read_file on ".htaccess" or "public_html/.htaccess" or "public_html/commander/.htaccess").
+   - If server-wide Apache/Passenger virtual host changes are required, advise the user to check via WHM or SSH root terminal, but offer to inspect or configure their local .htaccess.
+Be direct, helpful, and take action with your actual tools rather than presenting unnecessary menus of options.`;
 
   const conversation: any[] = [
     { role: 'system' as const, content: systemPrompt },
@@ -365,8 +444,12 @@ When asked about system metrics, PM2 status, running processes, or website files
         output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
         onToolCall(call.toolName, args, result);
       } catch (err: any) {
-        output = `Error executing tool: ${err.message}`;
-        onToolCall(call.toolName, args, { error: err.message });
+        const errMsg = err.message || 'Unknown error';
+        output = `Error executing tool: ${errMsg}`;
+        onToolCall(call.toolName, args, {
+          error: errMsg,
+          details: err.details || undefined,
+        });
       }
 
       conversation.push({

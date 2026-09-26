@@ -224,7 +224,7 @@ export const SettingsView: React.FC = () => {
                 className="input-field"
                 value={whmHost}
                 onChange={(e) => setWhmHost(e.target.value)}
-                placeholder="127.0.0.1 or rng1.rngsys.com"
+                placeholder="127.0.0.1 or server.yourdomain.com"
               />
             </div>
             <div>
@@ -254,7 +254,7 @@ export const SettingsView: React.FC = () => {
             />
           </div>
           <p style={{ fontSize: '12px', color: '#8b949e' }}>
-            For local testing from your PC, enter your server domain (e.g. <code>rng1.rngsys.com</code>). On the production cPanel server, you can use <code>127.0.0.1</code> or your server domain.
+            For local testing from your PC, enter your server domain (e.g. <code>server.yourdomain.com</code>). On the production cPanel server, you can use <code>127.0.0.1</code> or your server domain.
           </p>
         </div>
 

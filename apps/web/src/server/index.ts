@@ -8,6 +8,7 @@ import { getSystemMetrics } from './system.js';
 import { listDirectory, readFileContent, writeFileContent, deleteFileOrDirectory } from './files.js';
 import { testWhmConnection, listWhmAccounts, createWhmAccount, getWhmServiceStatus } from './whm.js';
 import { runWebChat, testOpenAiConnection } from './chat.js';
+import { listChatSessions, getChatSession, saveChatSession, deleteChatSession } from './sessions.js';
 
 const app = express();
 
@@ -137,7 +138,50 @@ app.get('/api/whm/services', requireAuth, async (_req: Request, res: Response) =
   }
 });
 
-// 5. AI Chat (Server-Sent Events streaming)
+// 5. AI Chat & Server-Side Session History
+app.get('/api/chat/sessions', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const sessions = await listChatSessions();
+    res.json({ success: true, data: sessions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/chat/sessions/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id || '';
+    const session = await getChatSession(id);
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+    res.json({ success: true, data: session });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/chat/sessions', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const session = await saveChatSession(req.body);
+    res.json({ success: true, data: session });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/chat/sessions/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id || '';
+    const success = await deleteChatSession(id);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Server-Sent Events streaming chat
 app.post('/api/chat', requireAuth, async (req: Request, res: Response) => {
   const { messages } = req.body || {};
   if (!messages || !Array.isArray(messages)) {

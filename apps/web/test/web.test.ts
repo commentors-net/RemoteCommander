@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { getSystemMetrics } from '../src/server/system.js';
-import { listDirectory, readFileContent, writeFileContent, deleteFileOrDirectory } from '../src/server/files.js';
-import { config, updateConfig } from '../src/server/config.js';
+import { listDirectory, readFileContent, writeFileContent, deleteFileOrDirectory, extractArchive, resolveSafePath } from '../src/server/files.js';
+import { config, updateConfig, encryptSecret, decryptSecret } from '../src/server/config.js';
 import { generateSessionToken } from '../src/server/auth.js';
 import { WEB_TOOLS } from '../src/server/chat.js';
 
@@ -110,4 +110,103 @@ describe('RemoteCommander Web Agent', () => {
     expect(procRes).toBeDefined();
     expect(Array.isArray(procRes.processes)).toBe(true);
   });
+
+  it('persists and manages chat sessions and logs on the server', async () => {
+    const { listChatSessions, saveChatSession, getChatSession, deleteChatSession } = await import('../src/server/sessions.js');
+
+    // 1. Create and save a new session with messages and tool results
+    const session = await saveChatSession({
+      id: 'test-session-1',
+      title: 'Inspect PM2 & Process Health',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [
+        { id: 'msg-1', role: 'user', content: 'What is the status of PM2?' },
+        {
+          id: 'msg-2',
+          role: 'assistant',
+          content: 'PM2 is checked.',
+          thought: 'Executing server.pm2_status...',
+          tools: [{ toolName: 'server.pm2_status', args: {}, result: { pm2Available: false } }],
+        },
+      ],
+    });
+
+    expect(session.id).toBe('test-session-1');
+    expect(session.title).toBe('Inspect PM2 & Process Health');
+    expect(session.messages.length).toBe(2);
+
+    // 2. Retrieve session from server
+    const fetched = await getChatSession('test-session-1');
+    expect(fetched).not.toBeNull();
+    expect(fetched?.title).toBe('Inspect PM2 & Process Health');
+    expect(fetched?.messages[1]?.tools?.[0]?.toolName).toBe('server.pm2_status');
+
+    // 3. List sessions
+    const list = await listChatSessions();
+    expect(list.some((s) => s.id === 'test-session-1')).toBe(true);
+
+    // 4. Delete session
+    const deleted = await deleteChatSession('test-session-1');
+    expect(deleted).toBe(true);
+
+    const afterDelete = await getChatSession('test-session-1');
+    expect(afterDelete).toBeNull();
+  });
+
+  it('encrypts and decrypts sensitive secrets using AES-256-GCM at rest', () => {
+    const rawKey = 'sample-dummy-secret-key-1234567890';
+    const encrypted = encryptSecret(rawKey);
+
+    // Verify ciphertext format and that raw secret is not present in ciphertext
+    expect(encrypted).toMatch(/^enc:v1:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/);
+    expect(encrypted).not.toContain(rawKey);
+
+    // Decrypt and verify round-trip integrity
+    const decrypted = decryptSecret(encrypted);
+    expect(decrypted).toBe(rawKey);
+
+    // Idempotency: re-encrypting an already encrypted string should return unchanged
+    expect(encryptSecret(encrypted)).toBe(encrypted);
+
+    // Handles plaintext/empty gracefully
+    expect(decryptSecret('')).toBe('');
+    expect(decryptSecret('raw-unencrypted-legacy')).toBe('raw-unencrypted-legacy');
+  });
+
+  it('resolves safe paths across websiteRoot and user home directory', () => {
+    const resolved = resolveSafePath('index.html');
+    expect(resolved).toBe(path.join(tempDir, 'index.html'));
+
+    // Strip redundant public_html prefix if websiteRoot ends with public_html
+    const pubHtmlRoot = path.join(tempDir, 'public_html');
+    updateConfig({ websiteRoot: pubHtmlRoot });
+    const resolvedPub = resolveSafePath('public_html/style.css');
+    expect(resolvedPub).toBe(path.join(pubHtmlRoot, 'style.css'));
+
+    // Allow user home directory
+    const userHome = os.homedir();
+    const resolvedHome = resolveSafePath(userHome);
+    expect(resolvedHome).toBe(path.resolve(userHome));
+
+    // Deny path traversal outside allowed roots and provide Why and Resolution
+    expect(() => resolveSafePath('../../../../../../../../../../etc/shadow')).toThrow();
+    
+    try {
+      resolveSafePath('/etc/apache2/conf/httpd.conf');
+      expect.unreachable();
+    } catch (err: any) {
+      expect(err.message).toContain('Access denied');
+      expect(err.message).toContain('Why:');
+      expect(err.message).toContain('.htaccess');
+      expect(err.message).toContain('Resolution:');
+    }
+  });
+
+  it('contains server.extract_zip in registered web tools', () => {
+    const toolNames = WEB_TOOLS.map((t) => t.name);
+    expect(toolNames).toContain('server.extract_zip');
+  });
 });
+
+

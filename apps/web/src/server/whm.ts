@@ -90,7 +90,7 @@ function doHttpsWhmRequest(
     req.on('error', (err: any) => {
       let friendlyMsg = err.message;
       if (err.code === 'ECONNREFUSED') {
-        friendlyMsg = `Connection refused at https://${host}:${port}. If testing locally from your PC, set WHM Host to your server domain (e.g. rng1.rngsys.com). On cPanel, ensure WHM service is running.`;
+        friendlyMsg = `Connection refused at https://${host}:${port}. If testing locally from your PC, set WHM Host to your server domain (e.g. server.yourdomain.com). On cPanel, ensure WHM service is running.`;
       } else if (err.code === 'ETIMEDOUT') {
         friendlyMsg = `Connection timed out connecting to https://${host}:${port}. Check firewall or port 2087 accessibility.`;
       }

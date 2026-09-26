@@ -16,8 +16,14 @@ import {
   History,
   Trash2,
   Plus,
+  RefreshCw,
+  ListChecks,
+  CornerDownRight,
+  Edit3,
+  CheckCircle2,
 } from 'lucide-react';
-import { getAuthToken, resolveApiEndpoint } from '../api.js';
+import { getAuthToken, resolveApiEndpoint, apiRequest } from '../api.js';
+import { extractInteractiveChoices } from '../options.js';
 
 export interface AttachedFile {
   name: string;
@@ -35,6 +41,7 @@ export interface ChatMessage {
   tools?: Array<{ toolName: string; args: any; result: any }>;
   isStreaming?: boolean;
   attachments?: AttachedFile[];
+  selectedChoice?: string;
 }
 
 export interface ChatSession {
@@ -105,20 +112,42 @@ const loadInitialSessions = (): { sessions: ChatSession[]; activeId: string } =>
   return { sessions: [def], activeId: def.id };
 };
 
+export function parseToolError(errorStr: string | undefined, details?: any) {
+  if (details && (details.reason || details.resolution)) {
+    return {
+      message: details.cleanPath ? `Access denied for: "${details.cleanPath}"` : 'Access denied',
+      reason: details.reason || '',
+      resolution: details.resolution || '',
+    };
+  }
+  if (!errorStr) return { message: '', reason: '', resolution: '' };
+  const str = String(errorStr);
+  const whyMatch = str.match(/Why:\s*(.+?)(?=\nResolution:|$)/s);
+  const resMatch = str.match(/Resolution:\s*(.+?)$/s);
+  return {
+    message: str.split('\nWhy:')[0].trim(),
+    reason: whyMatch ? whyMatch[1].trim() : '',
+    resolution: resMatch ? resMatch[1].trim() : '',
+  };
+}
+
 export const ChatView: React.FC = () => {
   const [{ sessions, activeId }, setSessionState] = useState(loadInitialSessions);
   const [showSessionsDrawer, setShowSessionsDrawer] = useState(false);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
+  const [collapsedToolErrors, setCollapsedToolErrors] = useState<Record<string, boolean>>({});
 
   const activeSession = sessions.find((s) => s.id === activeId) || sessions[0] || createDefaultSession();
-  const messages = activeSession.messages;
+  const messages = activeSession.messages || [];
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -136,6 +165,51 @@ export const ChatView: React.FC = () => {
       // Storage quota or disabled
     }
   }, [sessions, activeId]);
+
+  const syncSessionToServer = async (sessionToSync: ChatSession) => {
+    try {
+      await apiRequest('/api/chat/sessions', {
+        method: 'POST',
+        body: JSON.stringify(sessionToSync),
+      });
+    } catch {
+      // Local fallback preserved if server temporarily unreachable
+    }
+  };
+
+  const refreshSessionsFromServer = async () => {
+    setIsLoadingSessions(true);
+    try {
+      const res = await apiRequest('/api/chat/sessions');
+      const serverList = res.data;
+
+      if (Array.isArray(serverList) && serverList.length > 0) {
+        const targetId = activeId && serverList.some((s: any) => s.id === activeId) ? activeId : serverList[0].id;
+        const detailRes = await apiRequest(`/api/chat/sessions/${targetId}`);
+        if (detailRes.data) {
+          setSessionState({
+            sessions: serverList.map((s: any) => (s.id === targetId ? detailRes.data : { ...s, messages: [] })),
+            activeId: targetId,
+          });
+        }
+      } else {
+        const initial = loadInitialSessions();
+        if (initial.sessions.length > 0) {
+          for (const s of initial.sessions) {
+            await syncSessionToServer(s);
+          }
+        }
+      }
+    } catch {
+      // Offline fallback
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSessionsFromServer();
+  }, []);
 
   const setMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setSessionState((prev) => {
@@ -170,7 +244,7 @@ export const ChatView: React.FC = () => {
     });
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
     const newSession = createDefaultSession();
     setSessionState((prev) => ({
       sessions: [newSession, ...prev.sessions],
@@ -179,21 +253,43 @@ export const ChatView: React.FC = () => {
     setAttachments([]);
     setError(null);
     setShowSessionsDrawer(false);
+    await syncSessionToServer(newSession);
   };
 
-  const handleSelectSession = (sessionId: string) => {
-    setSessionState((prev) => ({
-      ...prev,
-      activeId: sessionId,
-    }));
+  const handleSelectSession = async (sessionId: string) => {
+    setShowSessionsDrawer(false);
     setAttachments([]);
     setError(null);
-    setShowSessionsDrawer(false);
+
+    const existing = sessions.find((s) => s.id === sessionId);
+    if (existing && existing.messages && existing.messages.length > 0) {
+      setSessionState((prev) => ({ ...prev, activeId: sessionId }));
+    } else {
+      try {
+        const res = await apiRequest(`/api/chat/sessions/${sessionId}`);
+        if (res.data) {
+          setSessionState((prev) => ({
+            sessions: prev.sessions.map((s) => (s.id === sessionId ? res.data : s)),
+            activeId: sessionId,
+          }));
+          return;
+        }
+      } catch {
+        // Fallback
+      }
+      setSessionState((prev) => ({ ...prev, activeId: sessionId }));
+    }
   };
 
-  const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    if (window.confirm('Delete this chat session?')) {
+    if (window.confirm('Delete this chat session from the server?')) {
+      try {
+        await apiRequest(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' });
+      } catch {
+        // Ignore
+      }
+
       setSessionState((prev) => {
         const filtered = prev.sessions.filter((s) => s.id !== sessionId);
         const nextSessions = filtered.length > 0 ? filtered : [createDefaultSession()];
@@ -256,13 +352,20 @@ export const ChatView: React.FC = () => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSend = async (e?: React.FormEvent) => {
+  const handleSend = async (
+    e?: React.FormEvent,
+    overridePrompt?: string,
+    fromAssistantId?: string,
+    selectedLabel?: string
+  ) => {
     if (e) e.preventDefault();
-    const prompt = input.trim();
+    const prompt = (overridePrompt !== undefined ? overridePrompt : input).trim();
     if ((!prompt && attachments.length === 0) || isThinking) return;
 
     setError(null);
-    setInput('');
+    if (overridePrompt === undefined) {
+      setInput('');
+    }
 
     const currentAttachments = [...attachments];
     setAttachments([]);
@@ -280,8 +383,16 @@ export const ChatView: React.FC = () => {
     const userMsgId = `user-${Date.now()}`;
     const assistantMsgId = `asst-${Date.now()}`;
 
+    const baseMessages = fromAssistantId
+      ? messages.map((m) =>
+          m.id === fromAssistantId
+            ? { ...m, selectedChoice: selectedLabel || prompt }
+            : m
+        )
+      : messages;
+
     const newMessages: ChatMessage[] = [
-      ...messages,
+      ...baseMessages,
       {
         id: userMsgId,
         role: 'user',
@@ -389,6 +500,15 @@ export const ChatView: React.FC = () => {
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)),
       );
+      setTimeout(() => {
+        setSessionState((prev) => {
+          const current = prev.sessions.find((s) => s.id === prev.activeId);
+          if (current) {
+            syncSessionToServer(current);
+          }
+          return prev;
+        });
+      }, 150);
     }
   };
 
@@ -474,6 +594,15 @@ export const ChatView: React.FC = () => {
               <span>Chat Sessions ({sessions.length})</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: '2px 6px', fontSize: '11px' }}
+                onClick={refreshSessionsFromServer}
+                title="Refresh sessions from server"
+              >
+                <RefreshCw size={12} className={isLoadingSessions ? 'spin' : ''} />
+              </button>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -653,30 +782,106 @@ export const ChatView: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Tool Call Badges */}
+                  {/* Tool Call Badges & Diagnostics */}
                   {!isUser && msg.tools && msg.tools.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    <div style={{ marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '4px' }}>
+                        {msg.tools.map((t, idx) => {
+                          const hasError = Boolean(t.result?.error);
+                          const toolKey = `${msg.id}-${idx}`;
+                          const isCollapsed = collapsedToolErrors[toolKey] ?? false;
+
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => {
+                                if (hasError) {
+                                  setCollapsedToolErrors((prev) => ({ ...prev, [toolKey]: !isCollapsed }));
+                                }
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11px',
+                                background: hasError ? 'rgba(248, 81, 73, 0.15)' : '#1f242c',
+                                border: `1px solid ${hasError ? '#f85149' : '#30363d'}`,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                color: hasError ? '#f85149' : '#58a6ff',
+                                cursor: hasError ? 'pointer' : 'default',
+                              }}
+                              title={hasError ? 'Click to toggle error diagnostic' : 'Tool executed successfully'}
+                            >
+                              {hasError ? <AlertCircle size={11} /> : <Wrench size={11} />}
+                              <span>Tool: {t.toolName}</span>
+                              {hasError && <span style={{ fontSize: '10px', opacity: 0.8 }}>(failed - click details)</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Tool Error Diagnostics Breakdown (Why & Resolution) */}
                       {msg.tools.map((t, idx) => {
                         const hasError = Boolean(t.result?.error);
+                        if (!hasError) return null;
+                        const toolKey = `${msg.id}-${idx}`;
+                        const isCollapsed = collapsedToolErrors[toolKey] ?? false;
+                        if (isCollapsed) return null;
+
+                        const parsed = parseToolError(t.result?.error, t.result?.details);
+
                         return (
                           <div
-                            key={idx}
+                            key={`err-${idx}`}
                             style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
+                              marginTop: '6px',
+                              padding: '8px 12px',
+                              background: 'rgba(218, 54, 51, 0.08)',
+                              border: '1px solid rgba(218, 54, 51, 0.35)',
+                              borderRadius: '6px',
                               fontSize: '11px',
-                              background: hasError ? 'rgba(248, 81, 73, 0.1)' : '#1f242c',
-                              border: `1px solid ${hasError ? '#f85149' : '#30363d'}`,
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              color: hasError ? '#f85149' : '#58a6ff',
+                              lineHeight: '1.5',
                             }}
-                            title={hasError ? `Error: ${t.result?.error}` : 'Tool executed successfully'}
                           >
-                            {hasError ? <AlertCircle size={11} /> : <Wrench size={11} />}
-                            <span>Tool: {t.toolName}</span>
-                            {hasError && <span style={{ fontSize: '10px', opacity: 0.8 }}>(failed)</span>}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                              <div style={{ fontWeight: 600, color: '#f85149', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <AlertCircle size={12} />
+                                <span>Tool Execution Diagnostic: {t.toolName}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCollapsedToolErrors((prev) => ({ ...prev, [toolKey]: true }))}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: '#8b949e',
+                                  fontSize: '10px',
+                                  cursor: 'pointer',
+                                  padding: '0 4px',
+                                }}
+                              >
+                                Hide
+                              </button>
+                            </div>
+
+                            {parsed.reason && (
+                              <div style={{ marginBottom: '4px', color: '#c9d1d9' }}>
+                                <span style={{ color: '#f85149', fontWeight: 600 }}>Why Access Denied: </span>
+                                <span>{parsed.reason}</span>
+                              </div>
+                            )}
+
+                            {parsed.resolution && (
+                              <div style={{ color: '#c9d1d9' }}>
+                                <span style={{ color: '#3fb950', fontWeight: 600 }}>Suggested Resolution: </span>
+                                <span>{parsed.resolution}</span>
+                              </div>
+                            )}
+
+                            {!parsed.reason && !parsed.resolution && (
+                              <div style={{ color: '#8b949e' }}>{t.result?.error}</div>
+                            )}
                           </div>
                         );
                       })}
@@ -762,6 +967,225 @@ export const ChatView: React.FC = () => {
                   >
                     {msg.content || (msg.isStreaming ? 'Thinking...' : '(No text response generated)')}
                   </div>
+
+                  {/* Interactive Choices / Quick Actions */}
+                  {!isUser && !msg.isStreaming && (() => {
+                    const choices = extractInteractiveChoices(msg.content);
+                    if (choices.length === 0) return null;
+
+                    // Check if an option was already selected or if this turn was already answered
+                    const msgIndex = messages.findIndex((m) => m.id === msg.id);
+                    const subsequentUserMsg =
+                      msgIndex >= 0
+                        ? messages.slice(msgIndex + 1).find((m) => m.role === 'user')
+                        : undefined;
+
+                    let selectedLabel = msg.selectedChoice;
+                    if (!selectedLabel && subsequentUserMsg) {
+                      const userContent = subsequentUserMsg.content.trim();
+                      const matched = choices.find(
+                        (c) =>
+                          userContent === c.value.trim() ||
+                          userContent.startsWith(c.value.trim()) ||
+                          userContent === c.label.trim() ||
+                          userContent.startsWith(c.label.trim()) ||
+                          userContent.includes(c.label.trim())
+                      );
+                      if (matched) {
+                        selectedLabel = matched.label;
+                      }
+                    }
+
+                    // Case 1: Option already selected — show ONLY the chosen option as a locked, confirmed badge
+                    // All other options and dropdown disappear completely so user cannot re-click them
+                    if (selectedLabel) {
+                      return (
+                        <div
+                          style={{
+                            marginTop: '8px',
+                            padding: '6px 12px',
+                            background: 'rgba(22, 27, 34, 0.85)',
+                            border: '1px solid #30363d',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '12px',
+                            color: '#8b949e',
+                          }}
+                        >
+                          <CheckCircle2 size={14} color="#3fb950" />
+                          <span>
+                            Selected: <strong style={{ color: '#e6edf3' }}>{selectedLabel}</strong>
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    // Case 2: Turn already answered by custom user message (not matching any choices)
+                    // Hide outdated options to prevent clicking obsolete actions from past turns
+                    if (subsequentUserMsg) {
+                      return null;
+                    }
+
+                    // Case 3: Active current prompt waiting for user decision — render one-click buttons & dropdown
+                    return (
+                      <div
+                        style={{
+                          marginTop: '8px',
+                          padding: '10px 12px',
+                          background: 'rgba(22, 27, 34, 0.95)',
+                          border: '1px solid #30363d',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: '#8b949e',
+                            marginBottom: '8px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px',
+                          }}
+                        >
+                          <ListChecks size={13} color="#58a6ff" />
+                          <span>Interactive Response (Click to send)</span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          {choices.map((choice) => (
+                            <div
+                              key={choice.id}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                borderRadius: '6px',
+                                border:
+                                  choice.variant === 'primary'
+                                    ? '1px solid #238636'
+                                    : choice.variant === 'danger'
+                                    ? '1px solid #da3633'
+                                    : '1px solid #388bfd',
+                                backgroundColor:
+                                  choice.variant === 'primary'
+                                    ? 'rgba(35, 134, 54, 0.15)'
+                                    : choice.variant === 'danger'
+                                    ? 'rgba(218, 54, 51, 0.15)'
+                                    : 'rgba(56, 139, 253, 0.12)',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleSend(undefined, choice.value, msg.id, choice.label)}
+                                disabled={isThinking}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '6px 12px',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color:
+                                    choice.variant === 'primary'
+                                      ? '#3fb950'
+                                      : choice.variant === 'danger'
+                                      ? '#f85149'
+                                      : '#58a6ff',
+                                  fontSize: '12px',
+                                  fontWeight: 500,
+                                  cursor: isThinking ? 'not-allowed' : 'pointer',
+                                  textAlign: 'left',
+                                }}
+                                title={`Click to reply "${choice.label}" immediately`}
+                              >
+                                <CornerDownRight size={13} />
+                                <span>{choice.label}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setInput(choice.value);
+                                  textInputRef.current?.focus();
+                                }}
+                                style={{
+                                  padding: '6px 8px',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  borderLeft: '1px solid rgba(255,255,255,0.1)',
+                                  color: '#8b949e',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                }}
+                                title="Insert into message box to edit"
+                              >
+                                <Edit3 size={11} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Dropdown Selector for Multiple Choices / Paths */}
+                        {choices.length >= 2 && (
+                          <div
+                            style={{
+                              marginTop: '10px',
+                              paddingTop: '8px',
+                              borderTop: '1px solid #30363d',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <span style={{ fontSize: '11px', color: '#8b949e' }}>Or select from dropdown:</span>
+                            <select
+                              id={`select-${msg.id}`}
+                              defaultValue={choices[0].value}
+                              style={{
+                                backgroundColor: '#0d1117',
+                                color: '#e6edf3',
+                                border: '1px solid #30363d',
+                                borderRadius: '4px',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                maxWidth: '340px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {choices.map((c) => (
+                                <option key={c.id} value={c.value}>
+                                  {c.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const sel = document.getElementById(`select-${msg.id}`) as HTMLSelectElement | null;
+                                if (sel && sel.value) {
+                                  const chosen = choices.find((c) => c.value === sel.value);
+                                  handleSend(undefined, sel.value, msg.id, chosen?.label);
+                                }
+                              }}
+                              disabled={isThinking}
+                              className="btn btn-primary"
+                              style={{ padding: '3px 10px', fontSize: '11px', height: '26px' }}
+                            >
+                              Apply & Send
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {isUser && (
@@ -863,6 +1287,7 @@ export const ChatView: React.FC = () => {
             <Paperclip size={16} />
           </button>
           <input
+            ref={textInputRef}
             type="text"
             className="input-field"
             value={input}

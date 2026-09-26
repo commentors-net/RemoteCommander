@@ -631,7 +631,7 @@ describe('M13 Multi-Provider AI: Tool Name Schema Sanitization (Regex Invariants
     const chunks: ChatStreamChunk[] = [];
     for await (const chunk of provider.streamChat({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: 'Check uptime on RNG1' }],
+      messages: [{ role: 'user', content: 'Check uptime on production-server-01' }],
       tools: [
         {
           name: 'ssh.execute',
